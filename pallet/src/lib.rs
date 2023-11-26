@@ -1,8 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[macro_use]
-extern crate uint;
-
 #[cfg(feature = "runtime-benchmarks")]
 pub mod benchmarking;
 
@@ -11,7 +8,6 @@ pub use pallet::*;
 use sp_std::vec::Vec;
 
 type CoordinatorPublicKeyDef<T> = BoundedVec<u8, <T as Config>::MaxPublicKeyLength>;
-type CoordinatorVerificationKeyDef<T> = BoundedVec<u8, <T as Config>::MaxVerificationKeyLength>;
 
 #[frame_support::pallet]
 pub mod pallet 
@@ -23,7 +19,6 @@ pub mod pallet
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
 
 	#[pallet::pallet]
-	#[pallet::generate_store(pub(super) trait Store)]
 	#[pallet::storage_version(STORAGE_VERSION)]
 	#[pallet::without_storage_info]
 	pub struct Pallet<T>(_);
@@ -76,6 +71,7 @@ pub mod pallet
 	impl<T: Config> Pallet<T> 
 	{
 		/// Permits the caller to create polls, and stores their keys.
+		#[pallet::call_index(0)]
 		#[pallet::weight(0)] // TODO weights
 		pub fn register_as_coordinator(
 			origin: OriginFor<T>,
@@ -108,107 +104,107 @@ pub mod pallet
 			Ok(())
 		}
 
-		/// Permits a coordinator to rotate their public,private keypair. Rejected if called during an ongoing poll.
-		#[pallet::weight(0)] // TODO weights
-		pub fn rotate_public_key(
-			_origin: OriginFor<T>,
-			some_arg: Vec<u8>
-		) -> DispatchResult
-		{
-			// TODO 
-			Ok(())
-		}
+		// /// Permits a coordinator to rotate their public,private keypair. Rejected if called during an ongoing poll.
+		// #[pallet::weight(0)] // TODO weights
+		// pub fn rotate_public_key(
+		// 	_origin: OriginFor<T>,
+		// 	some_arg: Vec<u8>
+		// ) -> DispatchResult
+		// {
+		// 	// TODO 
+		// 	Ok(())
+		// }
 
-		// Permites a coordinator to rotate their verification key. Rejected if called after signup period.
-		#[pallet::weight(0)] // TODO weights
-		pub fn rotate_verify_key(
-			_origin: OriginFor<T>,
-			some_arg: Vec<u8>
-		) -> DispatchResult
-		{
-			// TODO 
-			Ok(())
-		}
+		// // Permites a coordinator to rotate their verification key. Rejected if called after signup period.
+		// #[pallet::weight(0)] // TODO weights
+		// pub fn rotate_verify_key(
+		// 	_origin: OriginFor<T>,
+		// 	some_arg: Vec<u8>
+		// ) -> DispatchResult
+		// {
+		// 	// TODO 
+		// 	Ok(())
+		// }
 
-		// Permits a user to participate in an upcoming poll. Rejected if called after signup period.
-		#[pallet::weight(0)] // TODO weights
-		pub fn register_as_participant(
-			_origin: OriginFor<T>,
-			some_arg: Vec<u8>
-		) -> DispatchResult
-		{
-			// TODO 
-			Ok(())
-		}
+		// // Permits a user to participate in an upcoming poll. Rejected if called after signup period.
+		// #[pallet::weight(0)] // TODO weights
+		// pub fn register_as_participant(
+		// 	_origin: OriginFor<T>,
+		// 	some_arg: Vec<u8>
+		// ) -> DispatchResult
+		// {
+		// 	// TODO 
+		// 	Ok(())
+		// }
 
-		/// Instantiates a new poll object with the caller as the designated coordinator. Emits an event with the poll data.
-		#[pallet::weight(0)] // TODO weights
-		pub fn create_poll(
-			_origin: OriginFor<T>,
-			some_arg: Vec<u8>
-		) -> DispatchResult
-		{
-			// A coordinator may only have a single active poll at a given time
+		// /// Instantiates a new poll object with the caller as the designated coordinator. Emits an event with the poll data.
+		// #[pallet::weight(0)] // TODO weights
+		// pub fn create_poll(
+		// 	_origin: OriginFor<T>,
+		// 	some_arg: Vec<u8>
+		// ) -> DispatchResult
+		// {
+		// 	// A coordinator may only have a single active poll at a given time
 
-			// A poll has the following properties:
-			// - id
-			// - coordinator
-			// - options vector
-			// - start/end times
-			// - result
+		// 	// A poll has the following properties:
+		// 	// - id
+		// 	// - coordinator
+		// 	// - options vector
+		// 	// - start/end times
+		// 	// - result
 
-			Ok(())
-		}
+		// 	Ok(())
+		// }
 
-		/// Inserts a message into the message tree for future processing by the coordinator. Valid messages include: a vote, 
-		/// and a key rotation. Rejected if sent outside of the timeline specified by the poll config. Participants may secretly
-		/// call this method to override their vote, thereby deincentivizing bribery.
-		#[pallet::weight(0)] // TODO weights
-		pub fn interact_with_poll(
-			_origin: OriginFor<T>,
-			some_arg: Vec<u8>
-		) -> DispatchResult
-		{
-			// TODO 
-			Ok(())
-		}
+		// /// Inserts a message into the message tree for future processing by the coordinator. Valid messages include: a vote, 
+		// /// and a key rotation. Rejected if sent outside of the timeline specified by the poll config. Participants may secretly
+		// /// call this method to override their vote, thereby deincentivizing bribery.
+		// #[pallet::weight(0)] // TODO weights
+		// pub fn interact_with_poll(
+		// 	_origin: OriginFor<T>,
+		// 	some_arg: Vec<u8>
+		// ) -> DispatchResult
+		// {
+		// 	// TODO 
+		// 	Ok(())
+		// }
 
-		/// Used by the coordinator to compute roots of message state tree, which is used as a commitment value by the proof 
-		/// verification logic. Rejected if called prior to poll end.
-		#[pallet::weight(0)] // TODO weights
-		pub fn merge_poll_state(
-			_origin: OriginFor<T>,
-			some_arg: Vec<u8>
-		) -> DispatchResult
-		{
-			// TODO 
-			Ok(())
-		}
+		// /// Used by the coordinator to compute roots of message state tree, which is used as a commitment value by the proof 
+		// /// verification logic. Rejected if called prior to poll end.
+		// #[pallet::weight(0)] // TODO weights
+		// pub fn merge_poll_state(
+		// 	_origin: OriginFor<T>,
+		// 	some_arg: Vec<u8>
+		// ) -> DispatchResult
+		// {
+		// 	// TODO 
+		// 	Ok(())
+		// }
 
-		/// Verifies the proof that the current batch of messages have been correctly processed and, if successful, updates
-		/// the current verification state. Rejected if called prior to the merge of poll state.
-		#[pallet::weight(0)] // TODO weights
-		pub fn commit_processed_messages(
-			_origin: OriginFor<T>,
-			some_arg: Vec<u8>
-		) -> DispatchResult
-		{
-			// TODO 
-			Ok(())
-		}
+		// /// Verifies the proof that the current batch of messages have been correctly processed and, if successful, updates
+		// /// the current verification state. Rejected if called prior to the merge of poll state.
+		// #[pallet::weight(0)] // TODO weights
+		// pub fn commit_processed_messages(
+		// 	_origin: OriginFor<T>,
+		// 	some_arg: Vec<u8>
+		// ) -> DispatchResult
+		// {
+		// 	// TODO 
+		// 	Ok(())
+		// }
 
-		/// Verifies the proof that the current batch of votes has been correctly tallied and, if successful, updates the 
-		/// current verification state. Rejected if messages have not yet been processed. On verification of the final
-		/// batch the poll result is recorded in storage and an event is emitted containing the result. Rejected if called
-		/// before poll end.
-		#[pallet::weight(0)] // TODO weights
-		pub fn commit_tally_result(
-			_origin: OriginFor<T>,
-			some_arg: Vec<u8>
-		) -> DispatchResult
-		{
-			// TODO 
-			Ok(())
-		}
+		// /// Verifies the proof that the current batch of votes has been correctly tallied and, if successful, updates the 
+		// /// current verification state. Rejected if messages have not yet been processed. On verification of the final
+		// /// batch the poll result is recorded in storage and an event is emitted containing the result. Rejected if called
+		// /// before poll end.
+		// #[pallet::weight(0)] // TODO weights
+		// pub fn commit_tally_result(
+		// 	_origin: OriginFor<T>,
+		// 	some_arg: Vec<u8>
+		// ) -> DispatchResult
+		// {
+		// 	// TODO 
+		// 	Ok(())
+		// }
 	}
 }
