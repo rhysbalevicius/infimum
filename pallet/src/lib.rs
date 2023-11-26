@@ -11,7 +11,6 @@ mod tests;
 pub mod benchmarking;
 
 type PollId = u32;
-type PollIds<T> = BoundedVec<PollId, <T as Config>::MaxCoordinatorPolls>;
 type CoordinatorPublicKeyDef<T> = BoundedVec<u8, <T as Config>::MaxPublicKeyLength>;
 type CoordinatorVerifyKeyDef<T> = BoundedVec<u8, <T as Config>::MaxVerifyKeyLength>;
 
@@ -66,9 +65,16 @@ pub mod pallet
 		},
 		
 		/// A new poll was created.
-		PollCreated { coordinator: T::AccountId /* ... */ },
-
-		Test { t: BlockNumberFor<T> }
+		PollCreated {
+			/// The poll index.
+			index: PollId,
+			/// The poll coordinator.
+			coordinator: T::AccountId,
+			/// The block number the poll signup period ends and voting commences.
+			starts_at: BlockNumberFor<T>,
+			/// The block number the voting period commences.
+			ends_at: BlockNumberFor<T>
+		},
 	}
 
 	#[pallet::error]
@@ -86,19 +92,13 @@ pub mod pallet
 		/// Coordinator verification key is too long.
 		CoordinatorVerifyKeyTooLong,
 
+		/// Coordinator may not create new polls.
+		CoordinatorMayNotCreatePolls,
+
+		/// Poll is on-going.
+		PollOngoing,
+
 	}
-
-	/// The next free poll index, i.e. the number of polls created so far.
-	#[pallet::storage]
-	#[pallet::getter(fn poll_count)]
-	pub type PollCount<T> = StorageValue<_, PollId, ValueQuery>;
-
-	// #[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
-	// pub struct Test 
-	// {
-	// 	x:u64,
-	// 	y:u64
-	// }
 
 	/// Poll storage definition.
 	#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
@@ -131,7 +131,7 @@ pub mod pallet
 
 	/// Map of ids to polls.
 	#[pallet::storage]
-	pub type Polls<T: Config> = StorageMap<
+	pub type Polls<T: Config> = CountedStorageMap<
 		_,
 		Twox64Concat,
 		PollId,
@@ -147,11 +147,7 @@ pub mod pallet
 		pub public_key: CoordinatorPublicKeyDef<T>,
 
 		/// The coordinators verify key.
-		pub verify_key: CoordinatorVerifyKeyDef<T>,
-
-		///// The coordinators polls.
-		// pub poll_ids: CoordinatorPollIds<T>
-		// pub poll_ids: Vec<PollId>
+		pub verify_key: CoordinatorVerifyKeyDef<T>
 	}
 
 	/// Map of coordinators to their keys.
@@ -165,11 +161,13 @@ pub mod pallet
 
 	/// Map of coordinators to the poll IDs they manage.
 	#[pallet::storage]
+	#[pallet::getter(fn poll_ids)]
 	pub type CoordinatorPollIDs<T: Config> = StorageMap<
 		_,
 		Blake2_128Concat,
 		T::AccountId,
-		PollIds<T>
+		Vec<PollId>,
+		ValueQuery
 	>;
 
 	#[pallet::call]
@@ -218,8 +216,7 @@ pub mod pallet
 			// Store the coordinator keys.
 			Coordinators::<T>::insert(&sender, Coordinator {
 				public_key: pk,
-				verify_key: vk,
-				// poll_ids: CoordinatorPollIds::<T>::default()
+				verify_key: vk
 			});
 
 			// Emit a registration event
@@ -229,5 +226,83 @@ pub mod pallet
 			Ok(())
 		}
 
+		/// Create a new poll object where the caller is the designated coordinator.
+		///
+		/// - `signup_period`: Specifies the number of blocks that callers may register as a participant to vote in the poll.
+		/// - `voting_period`: Specifies the number of blocks (following the signup period) that registered participants may vote for.
+		///
+		/// Emits `PollCreated`.
+		#[pallet::call_index(4)]
+		#[pallet::weight(0)]
+		pub fn create_poll(
+			origin: OriginFor<T>,
+			signup_period: BlockNumberFor<T>,
+			voting_period: BlockNumberFor<T>,
+
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			let sender = ensure_signed(origin)?;
+
+			// Check if origin is registered as a coordinator
+			ensure!(
+				Coordinators::<T>::contains_key(&sender), 
+				Error::<T>::CoordinatorNotRegistered
+			);
+
+			let coord_poll_ids = Self::poll_ids(&sender);
+
+			// A coordinator may have at most `MaxCoordinatorPolls` polls, skipped if zero.
+			let max_polls = T::MaxCoordinatorPolls::get() as usize;
+			ensure!(
+				max_polls == 0 || coord_poll_ids.len() < max_polls,
+				Error::<T>::CoordinatorMayNotCreatePolls
+			);
+
+			let created_at = <frame_system::Pallet<T>>::block_number();
+
+			// A coordinator may only have a single active poll at a given time.
+			let last_poll_index = coord_poll_ids.last();
+			if let Some(index) = last_poll_index
+			{
+				ensure!(
+					!poll_is_ongoing(created_at, Polls::<T>::get(index)),
+					Error::<T>::PollOngoing
+				);
+			}
+
+			let poll_index = Polls::<T>::count() + 1;
+			Polls::<T>::insert(&poll_index, Poll {
+				index: poll_index,
+				coordinator: sender.clone(),
+				created_at: created_at,
+				signup_period: signup_period,
+				voting_period: voting_period,
+			});
+
+			CoordinatorPollIDs::<T>::append(&sender, poll_index);
+
+			let starts_at = created_at + signup_period;
+			Self::deposit_event(Event::PollCreated { 
+				index: poll_index,
+				coordinator: sender,
+				starts_at: starts_at,
+				ends_at: starts_at + voting_period
+			});
+
+			Ok(())
+		}
+	}
+
+	fn poll_is_ongoing<T: Config>(
+		now: BlockNumberFor<T>,
+		poll: Option<Poll<T, PollId>>
+	) -> bool
+	{
+		if let Some(p) = poll
+		{
+			return now <= p.created_at + p.voting_period + p.signup_period;
+		}
+		false
 	}
 }
