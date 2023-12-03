@@ -222,11 +222,10 @@ pub mod pallet
 			Ok(())
 		}
 
-		/// Permits a coordinator to rotate their public key or verification key.
+		/// Permits a coordinator to rotate their public key.
 		/// Rejected if called during the voting period of the coordinators poll.
 		///
 		/// - `public_key`: The new public key for the coordinator.
-		/// - `verify_key`: The new verification key for the coordinator.
 		///
 		/// Emits `CoordinatorKeyChanged`.
 		#[pallet::call_index(1)]
@@ -284,7 +283,62 @@ pub mod pallet
 			Ok(())
 		}
 
+		/// Permits a coordinator to rotate their verification key.
+		/// Rejected if called during the voting period of the coordinators poll.
+		///
+		/// - `verify_key`: The new verification key for the coordinator.
+		///
+		/// Emits `CoordinatorKeyChanged`.
+		#[pallet::call_index(2)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(4, 1))]
+		pub fn rotate_verify_key(
+			origin: OriginFor<T>,
+			verify_key: Vec<u8>
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			let sender = ensure_signed(origin)?;
 
+			// Check if origin is registered as a coordinator.
+			ensure!(
+				Coordinators::<T>::contains_key(&sender), 
+				Error::<T>::CoordinatorNotRegistered
+			);
+
+			// Check that a poll is not currently in progress.
+			let coord_poll_ids = Self::poll_ids(&sender);
+			let last_poll_index = coord_poll_ids.last();
+			if let Some(index) = last_poll_index
+			{
+				ensure!(
+					!poll_in_signup(Polls::<T>::get(index)),
+					Error::<T>::PollOngoing
+				);
+			}
+
+			// TODO (rb) Validate the key provided, throw if it fails
+			let vk: CoordinatorVerifyKeyDef<T> = verify_key
+				.try_into()
+				.map_err(|_| Error::<T>::CoordinatorVerifyKeyTooLong)?;
+
+			if let Some(coordinator) = Coordinators::<T>::get(&sender)
+			{
+				// Store the coordinators updated public key.
+				Coordinators::<T>::insert(&sender, Coordinator {
+					public_key: coordinator.public_key,
+					verify_key: vk.clone()
+				});
+			} 
+
+			// Emit the key rotation event.
+			Self::deposit_event(Event::CoordinatorKeyChanged {
+				who: sender,
+				public_key: None,
+				verify_key: Some(vk)
+			});
+
+			Ok(())
+		}
 
 		/// Create a new poll object where the caller is the designated coordinator.
 		///
