@@ -174,9 +174,6 @@ pub mod pallet
 	impl<T: Config> Pallet<T> 
 	{
 		/// Register the caller as a coordinator, granting the ability to create polls.
-		/// 
-		/// The dispatch origin of this call must be _Signed_ and the sender must
-		/// have funds to cover the deposit.
 		///
 		/// - `public_key`: The public key of the coordinator.
 		/// - `verify_key`: The verification key of the coordinator.
@@ -204,7 +201,6 @@ pub mod pallet
 			// Validate the key provided, throw if it fails
 			// TODO (rb) verify that the public key is well defined
 			// TODO (rb) split out verification logic into helper fn
-			
 			let pk: CoordinatorPublicKeyDef<T> = public_key
 				.try_into()
 				.map_err(|_| Error::<T>::CoordinatorPublicKeyTooLong)?;
@@ -226,6 +222,70 @@ pub mod pallet
 			Ok(())
 		}
 
+		/// Permits a coordinator to rotate their public key or verification key.
+		/// Rejected if called during the voting period of the coordinators poll.
+		///
+		/// - `public_key`: The new public key for the coordinator.
+		/// - `verify_key`: The new verification key for the coordinator.
+		///
+		/// Emits `CoordinatorKeyChanged`.
+		#[pallet::call_index(1)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(4, 1))]
+		pub fn rotate_public_key(
+			origin: OriginFor<T>,
+			public_key: Vec<u8>
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			let sender = ensure_signed(origin)?;
+
+			// Check if origin is registered as a coordinator.
+			ensure!(
+				Coordinators::<T>::contains_key(&sender), 
+				Error::<T>::CoordinatorNotRegistered
+			);
+
+			// Check that a poll is not currently in progress.
+			let coord_poll_ids = Self::poll_ids(&sender);
+			let last_poll_index = coord_poll_ids.last();
+			if let Some(index) = last_poll_index
+			{
+				ensure!(
+					!poll_in_signup(Polls::<T>::get(index)),
+					Error::<T>::PollOngoing
+				);
+			}
+
+			// TODO (rb) Validate the key provided, throw if it fails
+			let pk: CoordinatorPublicKeyDef<T> = public_key
+				.try_into()
+				.map_err(|_| Error::<T>::CoordinatorPublicKeyTooLong)?;
+
+			// let vk: CoordinatorVerifyKeyDef<T> = verify_key
+				// .try_into()
+				// .map_err(|_| Error::<T>::CoordinatorVerifyKeyTooLong)?;
+
+			if let Some(coordinator) = Coordinators::<T>::get(&sender)
+			{
+				// Store the coordinators updated public key.
+				Coordinators::<T>::insert(&sender, Coordinator {
+					public_key: pk.clone(),
+					verify_key: coordinator.verify_key
+				});
+			} 
+
+			// Emit the key rotation event.
+			Self::deposit_event(Event::CoordinatorKeyChanged {
+				who: sender,
+				public_key: Some(pk),
+				verify_key: None
+			});
+
+			Ok(())
+		}
+
+
+
 		/// Create a new poll object where the caller is the designated coordinator.
 		///
 		/// - `signup_period`: Specifies the number of blocks that callers may register as a participant to vote in the poll.
@@ -233,7 +293,7 @@ pub mod pallet
 		///
 		/// Emits `PollCreated`.
 		#[pallet::call_index(4)]
-		#[pallet::weight(0)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(4, 2))]
 		pub fn create_poll(
 			origin: OriginFor<T>,
 			signup_period: BlockNumberFor<T>,
@@ -242,15 +302,15 @@ pub mod pallet
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
-			let sender = ensure_signed(origin)?;
+			let coordinator = ensure_signed(origin)?;
 
 			// Check if origin is registered as a coordinator
 			ensure!(
-				Coordinators::<T>::contains_key(&sender), 
+				Coordinators::<T>::contains_key(&coordinator), 
 				Error::<T>::CoordinatorNotRegistered
 			);
 
-			let coord_poll_ids = Self::poll_ids(&sender);
+			let coord_poll_ids = Self::poll_ids(&coordinator);
 
 			// A coordinator may have at most `MaxCoordinatorPolls` polls, skipped if zero.
 			let max_polls = T::MaxCoordinatorPolls::get() as usize;
@@ -259,49 +319,63 @@ pub mod pallet
 				Error::<T>::CoordinatorMayNotCreatePolls
 			);
 
-			let created_at = <frame_system::Pallet<T>>::block_number();
-
 			// A coordinator may only have a single active poll at a given time.
 			let last_poll_index = coord_poll_ids.last();
 			if let Some(index) = last_poll_index
 			{
 				ensure!(
-					!poll_is_ongoing(created_at, Polls::<T>::get(index)),
+					!poll_is_ongoing(Polls::<T>::get(index)),
 					Error::<T>::PollOngoing
 				);
 			}
 
-			let poll_index = Polls::<T>::count() + 1;
-			Polls::<T>::insert(&poll_index, Poll {
-				index: poll_index,
-				coordinator: sender.clone(),
-				created_at: created_at,
-				signup_period: signup_period,
-				voting_period: voting_period,
+			let index = Polls::<T>::count();
+			let created_at = <frame_system::Pallet<T>>::block_number();
+			Polls::<T>::insert(&index, Poll {
+				coordinator: coordinator.clone(),
+				index,
+				created_at,
+				signup_period,
+				voting_period
 			});
 
-			CoordinatorPollIDs::<T>::append(&sender, poll_index);
+			CoordinatorPollIDs::<T>::append(&coordinator, index);
 
 			let starts_at = created_at + signup_period;
+			let ends_at = starts_at + voting_period;
 			Self::deposit_event(Event::PollCreated { 
-				index: poll_index,
-				coordinator: sender,
-				starts_at: starts_at,
-				ends_at: starts_at + voting_period
+				index,
+				coordinator,
+				starts_at,
+				ends_at
 			});
 
 			Ok(())
 		}
 	}
 
+	/// Returns true iff poll is not None and `now` preceeds the end time of the poll.
 	fn poll_is_ongoing<T: Config>(
-		now: BlockNumberFor<T>,
 		poll: Option<Poll<T, PollId>>
 	) -> bool
 	{
 		if let Some(p) = poll
 		{
-			return now <= p.created_at + p.voting_period + p.signup_period;
+			let now = <frame_system::Pallet<T>>::block_number();
+			return now < (p.created_at + p.voting_period + p.signup_period);
+		}
+		false
+	}
+
+	/// Returns true iff poll is not None and `now` preceeds the start time of the poll.
+	fn poll_in_signup<T: Config>(
+		poll: Option<Poll<T, PollId>>
+	) -> bool
+	{
+		if let Some(p) = poll
+		{
+			let now = <frame_system::Pallet<T>>::block_number();
+			return now < (p.created_at + p.signup_period);
 		}
 		false
 	}
