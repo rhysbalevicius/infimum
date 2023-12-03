@@ -63,6 +63,12 @@ pub mod pallet
 			/// The new verify key, if it was rotated.
 			verify_key: Option<CoordinatorVerifyKeyDef<T>>
 		},
+
+		/// A participant registered to vote in a poll.
+		ParticipantRegistered { 
+			who: T::AccountId,
+			poll_id: PollId
+		},
 		
 		/// A new poll was created.
 		PollCreated {
@@ -95,8 +101,18 @@ pub mod pallet
 		/// Coordinator may not create new polls.
 		CoordinatorMayNotCreatePolls,
 
+		/// Maximum number of participants 
+		ParticipantLimitReached,
+
+		/// Participant is already registered in the poll.
+		ParticipantAlreadyRegistered,
+
 		/// Poll is on-going.
 		PollOngoing,
+
+		/// Poll does not exist.
+		PollDoesNotExist,
+
 
 	}
 
@@ -120,6 +136,9 @@ pub mod pallet
 		/// The poll voting period.
 		voting_period: BlockNumberFor<T>,
 
+		/// The maximum number of participants permitted.
+		max_participants: u32
+
 		// /// The result of the poll.
 
 		// /// Processing data?
@@ -136,6 +155,16 @@ pub mod pallet
 		Twox64Concat,
 		PollId,
 		Poll<T, PollId>
+	>;
+
+	/// Map of poll ids to their participants.
+	#[pallet::storage]
+	pub type PollParticipants<T: Config> = StorageMap<
+		_, 
+		Twox64Concat,
+		PollId,
+		Vec<T::AccountId>,
+		ValueQuery
 	>;
 
 	/// Coordinator storage definition.
@@ -340,6 +369,66 @@ pub mod pallet
 			Ok(())
 		}
 
+		/// Permits a user to participate in an upcoming poll. Rejected if signup period has elapsed.
+		///
+		///	- `poll_id`: The id of the poll.
+		///
+		/// Emits `ParticipantRegistered`.
+		#[pallet::call_index(3)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(4, 1))]
+		pub fn register_as_participant(
+			origin: OriginFor<T>,
+			poll_id: PollId
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			let sender = ensure_signed(origin)?;
+
+			// Coordinators are not permitted to participate in polls.
+			ensure!(
+				!Coordinators::<T>::contains_key(&sender), 
+				Error::<T>::CoordinatorNotRegistered
+			);
+
+			// Check that the poll exists.
+			ensure!(
+				Polls::<T>::contains_key(&poll_id),
+				Error::<T>::PollDoesNotExist
+			);
+
+			// Check that the signer has not already registered to vote.
+			let participants = PollParticipants::<T>::get(&poll_id);
+			ensure!(
+				!participants.contains(&sender),
+				Error::<T>::ParticipantAlreadyRegistered
+			);
+
+			// Check that the maximum number of sign-ups has not been reached.
+			let poll = Polls::<T>::get(&poll_id);
+			if let Some(ref poll) = poll
+			{
+				ensure!(
+					participants.len() < (poll.max_participants as usize),
+					Error::<T>::ParticipantLimitReached
+				);
+			}
+
+			// Check that the poll has not yet started.
+			ensure!(
+				poll_in_signup(poll),
+				Error::<T>::PollOngoing
+			);
+
+			PollParticipants::<T>::append(&poll_id, &sender);
+
+			Self::deposit_event(Event::ParticipantRegistered { 
+				who: sender, 
+				poll_id: poll_id
+			});
+
+			Ok(())
+		}
+
 		/// Create a new poll object where the caller is the designated coordinator.
 		///
 		/// - `signup_period`: Specifies the number of blocks that callers may register as a participant to vote in the poll.
@@ -352,7 +441,7 @@ pub mod pallet
 			origin: OriginFor<T>,
 			signup_period: BlockNumberFor<T>,
 			voting_period: BlockNumberFor<T>,
-
+			max_participants: u32
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
@@ -390,7 +479,8 @@ pub mod pallet
 				index,
 				created_at,
 				signup_period,
-				voting_period
+				voting_period,
+				max_participants
 			});
 
 			CoordinatorPollIDs::<T>::append(&coordinator, index);
