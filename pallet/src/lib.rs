@@ -1,8 +1,11 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use pallet::*;
-use sp_std::vec::Vec;
+use sp_std::vec;
 use frame_support::storage::bounded_vec::BoundedVec;
+use frame_support::traits::UnixTime;
+use dusk_bls12_381::BlsScalar;
+use dusk_poseidon::sponge;
 
 #[cfg(test)]
 mod tests;
@@ -11,8 +14,14 @@ mod tests;
 pub mod benchmarking;
 
 type PollId = u32;
-type CoordinatorPublicKeyDef<T> = BoundedVec<u8, <T as Config>::MaxPublicKeyLength>;
-type CoordinatorVerifyKeyDef<T> = BoundedVec<u8, <T as Config>::MaxVerifyKeyLength>;
+type Timestamp = u64;
+type Duration = Timestamp;
+type PoseidonHashBytes = [u8; 32];
+type PollInteractionData = [[u64; 4]; 16]; 
+type ProofData = [[u64; 4]; 16];
+type CommitmentData = PoseidonHashBytes;
+type VerifyKey<T> = BoundedVec<u8, <T as Config>::MaxVerifyKeyLength>;
+type VoteOptions<T> = BoundedVec<u128, <T as Config>::MaxVoteOptions>;
 
 #[frame_support::pallet]
 pub mod pallet 
@@ -21,7 +30,7 @@ pub mod pallet
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(0);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -29,22 +38,45 @@ pub mod pallet
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config 
+	pub trait Config: frame_system::Config
 	{
 		/// The overarching event type.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+
+		/// Permit access to the current "timestamp" represented in milliseconds.
+		type TimeProvider: UnixTime;
 
 		/// The maximum number of polls a given coordinator may create.
 		#[pallet::constant]
 		type MaxCoordinatorPolls: Get<u32>;
 
-		/// The maximum length of a coordinator public key.
-		#[pallet::constant]
-		type MaxPublicKeyLength: Get<u32>;
-
-		/// The maximum length of a coordinator verification key.
+		/// The maximum length of a coordinators verification key.
 		#[pallet::constant]
 		type MaxVerifyKeyLength: Get<u32>;
+
+		/// The maximum arity for the state trees.
+		#[pallet::constant]
+		type MaxTreeArity: Get<u8>;
+
+		/// The minimum arity for the state trees.
+		#[pallet::constant]
+		type MinTreeArity: Get<u8>;
+
+		// /// The maximum state tree depth.
+		#[pallet::constant]
+		type MaxTreeDepth: Get<u8>;
+
+		/// The maximum number of poll outcomes.
+		#[pallet::constant]
+		type MaxVoteOptions: Get<u32>;
+
+		/// The maximum allowable number of registrations.
+		#[pallet::constant]
+		type MaxPollRegistrations: Get<u32>;
+
+		/// The maximum allowable number of poll interactions.
+		#[pallet::constant]
+		type MaxPollInteractions: Get<u32>;
 	}
 
 	#[pallet::event]
