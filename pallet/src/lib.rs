@@ -84,24 +84,35 @@ pub mod pallet
 	pub enum Event<T: Config> 
 	{
 		/// A new coordinator was registered.
-		CoordinatorRegistered { who: T::AccountId },
-		
+		CoordinatorRegistered {
+			/// The coordinator.
+			who: T::AccountId,
+			/// The public key of the coordinator.
+			public_key: PublicKey
+		},
+
 		/// A coordinator rotated one of their keys.
 		CoordinatorKeyChanged { 
 			/// The coordinator.
 			who: T::AccountId, 
 			/// The new public key, if it was rotated.
-			public_key: Option<CoordinatorPublicKeyDef<T>>,
+			public_key: Option<PublicKey>,
 			/// The new verify key, if it was rotated.
-			verify_key: Option<CoordinatorVerifyKeyDef<T>>
+			verify_key: Option<VerifyKey<T>>
 		},
 
 		/// A participant registered to vote in a poll.
 		ParticipantRegistered { 
-			who: T::AccountId,
-			poll_id: PollId
+			/// The index of the poll registered in.
+			poll_id: PollId,
+			/// The current registration count.
+			count: u32,
+			/// The timestamp of the registration.
+			timestamp: Timestamp,
+			/// The registrations ephemeral public key.
+			public_key: PublicKey
 		},
-		
+
 		/// A new poll was created.
 		PollCreated {
 			/// The poll index.
@@ -109,10 +120,38 @@ pub mod pallet
 			/// The poll coordinator.
 			coordinator: T::AccountId,
 			/// The block number the poll signup period ends and voting commences.
-			starts_at: BlockNumberFor<T>,
+			starts_at: Timestamp,
 			/// The block number the voting period commences.
-			ends_at: BlockNumberFor<T>
+			ends_at: Timestamp,
+			/// Optional metadata associated with poll.
+			metadata: Option<T::Hash>
 		},
+
+		/// Poll state has been merged.
+		PollStateMerged {
+			/// The poll index.
+			index: PollId,
+			/// The poll registration tree.
+			registration_tree: Option<PollStateTree>,
+			/// The poll interaction tree.
+			interaction_tree: Option<PollStateTree>
+		},
+
+		/// Poll was interacted with.
+		PollInteraction {
+			/// Ephemeral public key used to encrypt the message.
+			public_key: PublicKey,
+			/// Interaction data.
+			data: PollInteractionData
+		},
+
+		/// Poll result was verified.
+		PollOutcome {
+			/// The poll index.
+			index: PollId,
+			/// The outcome of the poll.
+			outcome: u128
+		}
 	}
 
 	#[pallet::error]
