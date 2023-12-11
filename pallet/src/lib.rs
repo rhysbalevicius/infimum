@@ -160,31 +160,165 @@ pub mod pallet
 		/// Coordinator is already registered.
 		CoordinatorAlreadyRegistered,
 
-		/// Coordinator is not registered.
+		/// Coordinator role not found.
 		CoordinatorNotRegistered,
-		
-		/// Coordinator public key is too long.
-		CoordinatorPublicKeyTooLong,
-		
-		/// Coordinator verification key is too long.
-		CoordinatorVerifyKeyTooLong,
 
-		/// Coordinator may not create new polls.
-		CoordinatorMayNotCreatePolls,
+		/// Coordinator poll limit reached.
+		CoordinatorPollLimitReached,
 
-		/// Maximum number of participants 
-		ParticipantLimitReached,
+		/// Maximum number of participants have registered.
+		ParticipantRegistrationLimitReached,
+
+		/// Maximum number of interactions have committed.
+		ParticipantInteractionLimitReached,
 
 		/// Participant is already registered in the poll.
 		ParticipantAlreadyRegistered,
 
-		/// Poll is on-going.
-		PollOngoing,
+		/// Poll config is invalid.
+		PollConfigInvalid,
+
+		/// Poll registration period is in progress.
+		PollRegistrationInProgress,
+
+		/// Poll registration period has ended.
+		PollRegistrationHasEnded,
+
+		/// Poll voting period is in progress.
+		PollVotingInProgress,
+
+		/// Poll has ended and may no longer be interacted with by participants.
+		PollVotingHasEnded,
 
 		/// Poll does not exist.
 		PollDoesNotExist,
 
+		/// Poll data is empty.
+		PollDataEmpty,
 
+		/// Poll must be processed before a new one is created.
+		PollMissingOutcome,
+
+		/// Poll trees must be merged before an outcome may be committed.
+		PollTreesNotMerged,
+
+		/// Poll outcome was previously committed and verified.
+		PollOutcomeAlreadyCommitted,
+
+		/// Poll data is malformed.
+		MalformedPollData,
+
+		/// The public key is malformed.
+		MalformedPublicKey,
+
+		/// The verify key is malformed.
+		MalformedVerifyKey,
+
+		/// A proof was rejected.
+		MalformedProof
+	}
+
+	/// Public keys committed by both coordinators and participants.
+	#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+	pub struct PublicKey 
+	{
+		/// A 256-bit x-coordinate of the public key.
+		x: [u64; 4],
+
+		/// A 256-bit y-coordinate of the public key.
+		y: [u64; 4]
+	}
+
+	#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+	pub struct PollState
+	{
+		/// The number of registered participants. Known only after the poll has been processed.
+		num_participants: u32,
+
+		/// The number of registered participants. Known only after the poll has been processed.
+		num_interactions: u32,
+
+		/// The merkle tree of registration data.
+		registration_tree: PollStateTree,
+
+		/// The merkle tree of interaction data.
+		interaction_tree: PollStateTree,
+
+		/// The number of valid commitments witnessed.
+		num_witnessed: u32,
+
+		/// The current proof commitment.
+		commitment: (u32, [u8; 32]),
+
+		/// The final result of the poll.
+		outcome: Option<u128>,
+	}
+
+	#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+	pub struct PollStateTree
+	{
+		/// The depth of the subtree.
+		subtree_depth: u8,
+
+		// TODO (M1) replace `PollRegistrationHashes` and `PollInteractionHashes` storage with single BoundedVec here
+		// subtree_hashes: vec::Vec<[u8; 32]>,
+
+		/// The subroot of the tree.
+		subtree_root: Option<PoseidonHashBytes>,
+
+		/// The root of the "full"-depth tree containing `subtree_root` and zeros elsewhere.
+		root: Option<PoseidonHashBytes>,
+	}
+
+	impl Default for PollStateTree
+	{
+		fn default() -> PollStateTree
+		{
+			PollStateTree {
+				subtree_depth: 0,
+				subtree_root: None,
+				root: None
+			}
+		}
+	}
+
+	impl Default for PollState 
+	{
+		fn default() -> PollState 
+		{
+			PollState {
+				num_participants: 0,
+				num_interactions: 0,
+				num_witnessed: 0,
+				registration_tree: PollStateTree::default(),
+				interaction_tree: PollStateTree::default(),
+				commitment: (0, [0; 32]),
+				outcome: None
+			}
+		}
+	}
+
+	#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+	#[scale_info(skip_type_params(T))]
+	pub struct PollConfiguration<T: Config>
+	{
+		/// The poll signup duration (in ms).
+		signup_period: Duration,
+
+		/// The poll voting duration (in ms).
+		voting_period: Duration,
+
+		/// The maximum number of participants permitted.
+		max_participants: u32,
+
+		/// The possible outcomes of the poll.
+		vote_options: VoteOptions<T>,
+
+		/// The size of 
+		batch_size: u8,
+
+		/// The arity of the state trees.
+		tree_arity: u8
 	}
 
 	/// Poll storage definition.
@@ -198,25 +332,17 @@ pub mod pallet
 		/// The poll creator.
 		coordinator: T::AccountId,
 
-		/// The poll creation time.
-		created_at: BlockNumberFor<T>,
+		/// The poll creation time (in ms).
+		created_at: Timestamp,
 
-		/// The poll signup period.
-		signup_period: BlockNumberFor<T>,
+		/// Optional metadata associated to the poll.
+		metadata: Option<T::Hash>,
 
-		/// The poll voting period.
-		voting_period: BlockNumberFor<T>,
+		/// The mutable poll state.
+		state: PollState,
 
-		/// The maximum number of participants permitted.
-		max_participants: u32
-
-		// /// The result of the poll.
-
-		// /// Processing data?
-
-		// /// Metadata?
-
-		// /// The options (e.g. fn preimages?).
+		/// The poll config.
+		config: PollConfiguration<T>
 	}
 
 	/// Map of ids to polls.
@@ -228,13 +354,33 @@ pub mod pallet
 		Poll<T, PollId>
 	>;
 
-	/// Map of poll ids to their participants.
+	/// Ephemeral map of poll id to the hashes of registration data.
 	#[pallet::storage]
-	pub type PollParticipants<T: Config> = StorageMap<
-		_, 
+	pub type PollRegistrationHashes<T: Config> = StorageMap<
+		_,
 		Twox64Concat,
 		PollId,
-		Vec<T::AccountId>,
+		vec::Vec<PoseidonHashBytes>,
+		ValueQuery
+	>;
+
+	/// Ephemeral map of poll id to the hashes of voting data.
+	#[pallet::storage]
+	pub type PollInteractionHashes<T: Config> = StorageMap<
+		_,
+		Twox64Concat,
+		PollId,
+		vec::Vec<PoseidonHashBytes>,
+		ValueQuery
+	>;
+
+	/// Map of account ids to the polls they've registered for.
+	#[pallet::storage]
+	pub type PollsParticipatingIn<T: Config> = StorageMap<
+		_, 
+		Twox64Concat,
+		T::AccountId,
+		vec::Vec<PollId>,
 		ValueQuery
 	>;
 
@@ -244,10 +390,10 @@ pub mod pallet
 	pub struct Coordinator<T: Config> 
 	{
 		/// The coordinators public key.
-		pub public_key: CoordinatorPublicKeyDef<T>,
+		pub public_key: PublicKey,
 
 		/// The coordinators verify key.
-		pub verify_key: CoordinatorVerifyKeyDef<T>
+		pub verify_key: VerifyKey<T>
 	}
 
 	/// Map of coordinators to their keys.
