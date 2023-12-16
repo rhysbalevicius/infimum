@@ -515,51 +515,153 @@ pub mod pallet
 		///
 		/// Emits `CoordinatorKeyChanged`.
 		#[pallet::call_index(2)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(4, 1))]
+		#[pallet::weight(T::DbWeight::get().reads_writes(3, 1))]
 		pub fn rotate_verify_key(
 			origin: OriginFor<T>,
-			verify_key: Vec<u8>
+			verify_key: vec::Vec<u8>
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			// Check if origin is registered as a coordinator.
-			ensure!(
-				Coordinators::<T>::contains_key(&sender), 
-				Error::<T>::CoordinatorNotRegistered
-			);
+			let verify_key: VerifyKey<T> = verify_key
+				.try_into()
+				.map_err(|_| Error::<T>::MalformedVerifyKey)?;
 
-			// Check that a poll is not currently in progress.
+			// Check if origin is registered as a coordinator.
+			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+
+			// Check that a poll is not currently in progress, if it exists.
 			let coord_poll_ids = Self::poll_ids(&sender);
 			let last_poll_index = coord_poll_ids.last();
 			if let Some(index) = last_poll_index
 			{
 				ensure!(
-					!poll_in_signup(Polls::<T>::get(index)),
-					Error::<T>::PollOngoing
+					!poll_in_voting_period(Polls::<T>::get(index)),
+					Error::<T>::PollVotingInProgress
 				);
 			}
 
-			// TODO (rb) Validate the key provided, throw if it fails
-			let vk: CoordinatorVerifyKeyDef<T> = verify_key
-				.try_into()
-				.map_err(|_| Error::<T>::CoordinatorVerifyKeyTooLong)?;
-
-			if let Some(coordinator) = Coordinators::<T>::get(&sender)
-			{
-				// Store the coordinators updated public key.
-				Coordinators::<T>::insert(&sender, Coordinator {
-					public_key: coordinator.public_key,
-					verify_key: vk.clone()
-				});
-			} 
+			// Store the coordinators updated public key.
+			Coordinators::<T>::insert(&sender, Coordinator {
+				public_key: coordinator.public_key,
+				verify_key: verify_key.clone()
+			});
 
 			// Emit the key rotation event.
 			Self::deposit_event(Event::CoordinatorKeyChanged {
 				who: sender,
 				public_key: None,
-				verify_key: Some(vk)
+				verify_key: Some(verify_key)
+			});
+
+			Ok(())
+		}
+
+		/// Create a new poll object where the caller is the designated coordinator.
+		///
+		/// - `signup_period`: The poll signup duration (in ms).
+		/// - `voting_period`: The poll voting duration (in ms).
+		/// - `max_participants`: The maximum number of participants permitted.
+		/// - `vote_options`: The possible outcomes of the poll.
+		/// - `tree_arity`: The arity of the state trees.
+		/// - `batch_size`: 
+		/// - `metadata`: Optional metadata associated to the poll.
+		///
+		/// Emits `PollCreated`.
+		#[pallet::call_index(3)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(5, 2))]
+		pub fn create_poll(
+			origin: OriginFor<T>,
+			signup_period: Duration,
+			voting_period: Duration,
+			max_participants: u32,
+			vote_options: vec::Vec<u128>,
+			tree_arity: u8,
+			batch_size: u8,
+			metadata: Option<T::Hash>
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			let sender = ensure_signed(origin)?;
+
+			// Validate config parameters.
+			ensure!(
+				(
+					max_participants <= T::MaxPollRegistrations::get() &&
+					tree_arity <= T::MaxTreeArity::get() &&
+					tree_arity >= T::MinTreeArity::get()
+				),
+				Error::<T>::PollConfigInvalid
+			);
+
+			let vote_options: VoteOptions<T> = vote_options
+				.try_into()
+				.map_err(|_| Error::<T>::PollConfigInvalid)?;
+
+			// Check that sender is registered as a coordinator.
+			ensure!(
+				Coordinators::<T>::contains_key(&sender), 
+				Error::<T>::CoordinatorNotRegistered
+			);
+
+			let coord_poll_ids = Self::poll_ids(&sender);
+
+			// A coordinator may have at most `MaxCoordinatorPolls` polls, skipped if zero.
+			let max_polls = T::MaxCoordinatorPolls::get() as usize;
+			ensure!(
+				coord_poll_ids.len() < max_polls,
+				Error::<T>::CoordinatorPollLimitReached
+			);
+
+			// A coordinator may only have a single active poll at a given time.
+			if let Some(index) = coord_poll_ids.last()
+			{
+				if let Some(poll) = Polls::<T>::get(index)
+				{
+					// Reject if last created poll is on-going.
+					ensure!(
+						poll_is_over(poll.clone()),
+						Error::<T>::PollMissingOutcome
+					);
+	
+					// Reject if last created poll has not been processed.
+					ensure!(
+						poll.state.outcome.is_some(),
+						Error::<T>::PollMissingOutcome
+					);
+				}
+			}
+
+			// Insert the poll into storage.
+			let index = Polls::<T>::count();
+			let created_at = T::TimeProvider::now().as_secs();
+			Polls::<T>::insert(&index, Poll {
+				index,
+				created_at,
+				metadata,
+				coordinator: sender.clone(),
+				state: PollState::default(),
+				config: PollConfiguration {
+					signup_period,
+					voting_period,
+					max_participants,
+					vote_options,
+					tree_arity,
+					batch_size
+				}
+			});
+			CoordinatorPollIds::<T>::append(&sender, index);
+
+			// Emit the creation event.
+			let starts_at = created_at + signup_period;
+			let ends_at = starts_at + voting_period;
+			Self::deposit_event(Event::PollCreated { 
+				coordinator: sender,
+				index,
+				starts_at,
+				ends_at,
+				metadata
 			});
 
 			Ok(())
@@ -568,126 +670,130 @@ pub mod pallet
 		/// Permits a user to participate in an upcoming poll. Rejected if signup period has elapsed.
 		///
 		///	- `poll_id`: The id of the poll.
+		/// - `public_key`: The ephemeral public key of the registrant.
 		///
 		/// Emits `ParticipantRegistered`.
-		#[pallet::call_index(3)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(4, 1))]
+		#[pallet::call_index(6)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(3, 3))]
 		pub fn register_as_participant(
 			origin: OriginFor<T>,
-			poll_id: PollId
+			poll_id: PollId,
+			public_key: PublicKey
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			// Coordinators are not permitted to participate in polls.
+			// Coordinator accounts are not permitted to participate in polls.
 			ensure!(
 				!Coordinators::<T>::contains_key(&sender), 
 				Error::<T>::CoordinatorNotRegistered
 			);
 
-			// Check that the poll exists.
+			// Check that the signer has not previously submitted a registration for this poll.
+			let participants = PollsParticipatingIn::<T>::get(&sender);
 			ensure!(
-				Polls::<T>::contains_key(&poll_id),
-				Error::<T>::PollDoesNotExist
-			);
-
-			// Check that the signer has not already registered to vote.
-			let participants = PollParticipants::<T>::get(&poll_id);
-			ensure!(
-				!participants.contains(&sender),
+				!participants.contains(&poll_id),
 				Error::<T>::ParticipantAlreadyRegistered
 			);
 
-			// Check that the maximum number of sign-ups has not been reached.
-			let poll = Polls::<T>::get(&poll_id);
-			if let Some(ref poll) = poll
-			{
-				ensure!(
-					participants.len() < (poll.max_participants as usize),
-					Error::<T>::ParticipantLimitReached
-				);
-			}
+			// Ensure that the poll exists.
+			let Some(mut poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-			// Check that the poll has not yet started.
+			// Check that the poll is still in the signup period.
 			ensure!(
-				poll_in_signup(poll),
-				Error::<T>::PollOngoing
+				poll_in_signup_period(poll.clone()),
+				Error::<T>::PollRegistrationHasEnded
 			);
 
-			PollParticipants::<T>::append(&poll_id, &sender);
+			// Check that the maximum number of sign-ups has not been reached.
+			ensure!(
+				poll.state.num_participants < poll.config.max_participants,
+				Error::<T>::ParticipantRegistrationLimitReached
+			);
+
+			// Increment the number of participants.
+			let count = poll.state.num_participants + 1;
+			poll.state.num_participants = count;
+			Polls::<T>::insert(&poll_id, poll);
+
+			// Mark the signer as having registered in this poll.
+			PollsParticipatingIn::<T>::append(&sender, &poll_id);
+				
+			// Record the hash of the registration data
+			let timestamp = T::TimeProvider::now().as_secs();
+			let leaf_hash = sponge::hash(&vec![
+				BlsScalar(public_key.x),
+				BlsScalar(public_key.y),
+				BlsScalar::one(),
+				BlsScalar::from(timestamp)
+			]);
+			PollRegistrationHashes::<T>::append(&poll_id, leaf_hash.to_bytes());
 
 			Self::deposit_event(Event::ParticipantRegistered { 
-				who: sender, 
-				poll_id: poll_id
+				poll_id,
+				count,
+				public_key,
+				timestamp
 			});
 
 			Ok(())
 		}
 
-		/// Create a new poll object where the caller is the designated coordinator.
+		/// Inserts a message into the message tree for future processing by the coordinator. Valid messages include: a vote, 
+		/// and a key rotation. Rejected if sent outside of the timeline specified by the poll config. Participants may secretly
+		/// call this method to override their vote, thereby deincentivizing bribery.
+
+		/// TODO (M1) write description/header
 		///
-		/// - `signup_period`: Specifies the number of blocks that callers may register as a participant to vote in the poll.
-		/// - `voting_period`: Specifies the number of blocks (following the signup period) that registered participants may vote for.
+		/// - `poll_id`: The id of the poll.
+		/// - `public_key`: The current ephemeral public key of the registrant. May be different than the one used for registration.
+		/// - `data`: ...
 		///
-		/// Emits `PollCreated`.
-		#[pallet::call_index(4)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(4, 2))]
-		pub fn create_poll(
+		/// Emits `PollInteraction`.
+		#[pallet::call_index(7)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 2))]
+		pub fn interact_with_poll(
 			origin: OriginFor<T>,
-			signup_period: BlockNumberFor<T>,
-			voting_period: BlockNumberFor<T>,
-			max_participants: u32
+			poll_id: PollId,
+			public_key: PublicKey,
+			data: PollInteractionData
 		) -> DispatchResult
 		{
-			// Check that the extrinsic was signed and get the signer.
-			let coordinator = ensure_signed(origin)?;
+			// Ensure that the extrinsic was signed.
+			let _ = ensure_signed(origin)?;
 
-			// Check if origin is registered as a coordinator
+			// Ensure that the poll exists.
+			let Some(mut poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+
+			// Check that we're in a voting period.
 			ensure!(
-				Coordinators::<T>::contains_key(&coordinator), 
-				Error::<T>::CoordinatorNotRegistered
+				!poll_is_over(poll.clone()),
+				Error::<T>::PollVotingHasEnded
 			);
 
-			let coord_poll_ids = Self::poll_ids(&coordinator);
-
-			// A coordinator may have at most `MaxCoordinatorPolls` polls, skipped if zero.
-			let max_polls = T::MaxCoordinatorPolls::get() as usize;
+			// Check that we've not reached the maximum number of interactions.
 			ensure!(
-				max_polls == 0 || coord_poll_ids.len() < max_polls,
-				Error::<T>::CoordinatorMayNotCreatePolls
+				poll.state.num_interactions < T::MaxPollInteractions::get(),
+				Error::<T>::ParticipantInteractionLimitReached
 			);
 
-			// A coordinator may only have a single active poll at a given time.
-			let last_poll_index = coord_poll_ids.last();
-			if let Some(index) = last_poll_index
-			{
-				ensure!(
-					!poll_is_ongoing(Polls::<T>::get(index)),
-					Error::<T>::PollOngoing
-				);
-			}
+			// Hash and record the interaction data.
+			let mut leaf_data = data.map(|x| BlsScalar(x)).to_vec();
+			leaf_data.push(BlsScalar(public_key.x));
+			leaf_data.push(BlsScalar(public_key.y));
+			PollRegistrationHashes::<T>::append(
+				&poll_id,
+				sponge::hash(&leaf_data).to_bytes()
+			);
 
-			let index = Polls::<T>::count();
-			let created_at = <frame_system::Pallet<T>>::block_number();
-			Polls::<T>::insert(&index, Poll {
-				coordinator: coordinator.clone(),
-				index,
-				created_at,
-				signup_period,
-				voting_period,
-				max_participants
-			});
+			// Increment the number of interactions.
+			poll.state.num_interactions = poll.state.num_interactions + 1;
+			Polls::<T>::insert(&poll_id, poll);
 
-			CoordinatorPollIDs::<T>::append(&coordinator, index);
-
-			let starts_at = created_at + signup_period;
-			let ends_at = starts_at + voting_period;
-			Self::deposit_event(Event::PollCreated { 
-				index,
-				coordinator,
-				starts_at,
-				ends_at
+			Self::deposit_event(Event::PollInteraction { 
+				public_key,
+				data
 			});
 
 			Ok(())
@@ -695,28 +801,37 @@ pub mod pallet
 	}
 
 	/// Returns true iff poll is not None and `now` preceeds the end time of the poll.
-	fn poll_is_ongoing<T: Config>(
+	fn poll_in_voting_period<T: Config>(
 		poll: Option<Poll<T, PollId>>
 	) -> bool
 	{
 		if let Some(p) = poll
 		{
-			let now = <frame_system::Pallet<T>>::block_number();
-			return now < (p.created_at + p.voting_period + p.signup_period);
+			let now = T::TimeProvider::now().as_secs();
+			let voting_period_start = p.created_at + p.config.signup_period;
+			let voting_period_end = voting_period_start + p.config.voting_period;
+			return now >= voting_period_start && now < voting_period_end;
 		}
 		false
 	}
 
-	/// Returns true iff poll is not None and `now` preceeds the start time of the poll.
-	fn poll_in_signup<T: Config>(
-		poll: Option<Poll<T, PollId>>
+	/// Returns true iff `now` preceeds the start time of the poll.
+	fn poll_in_signup_period<T: Config>(
+		poll: Poll<T, PollId>
 	) -> bool
 	{
-		if let Some(p) = poll
-		{
-			let now = <frame_system::Pallet<T>>::block_number();
-			return now < (p.created_at + p.signup_period);
-		}
-		false
+		let now = T::TimeProvider::now().as_secs();
+		return now < poll.created_at + poll.config.signup_period;
+	}
+
+	/// Returns true iff poll has ended.
+	fn poll_is_over<T: Config>(
+		poll: Poll<T, PollId>
+	) -> bool
+	{
+		let now = T::TimeProvider::now().as_secs();
+		let voting_period_start = poll.created_at + poll.config.signup_period;
+		let voting_period_end = voting_period_start + poll.config.voting_period;
+		return now < voting_period_end;
 	}
 }
