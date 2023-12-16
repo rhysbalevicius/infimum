@@ -667,6 +667,115 @@ pub mod pallet
 			Ok(())
 		}
 
+		/// Compute the merkle roots of the current poll state tree. This operation must be
+		/// performed prior to commiting the poll outcome. Registration tree may be merged as
+		/// long as the registration period has elapsed, and the interaction tree may be 
+		/// merged as long as the voting period has elapsed.
+		///
+		/// Emits `PollStateMerged`.
+		#[pallet::call_index(4)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(4, 2))] 
+		pub fn merge_poll_state(
+			origin: OriginFor<T>
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			let sender = ensure_signed(origin)?;
+			
+			// Check that origin is registered as a coordinator
+			ensure!(
+				Coordinators::<T>::contains_key(&sender), 
+				Error::<T>::CoordinatorNotRegistered
+			);
+
+			// Get the coordinators most recent poll.
+			let coord_poll_ids = Self::poll_ids(&sender);
+			let last_poll_index = coord_poll_ids.last();
+
+			let Some(index) = last_poll_index else { Err(<Error::<T>>::PollDoesNotExist)? };
+			let Some(mut poll) = Polls::<T>::get(index) else { Err(<Error::<T>>::PollDoesNotExist)? };
+
+			// Check that the poll is not currently in the registration period.
+			ensure!(
+				!poll_in_signup_period(poll.clone()),
+				Error::<T>::PollRegistrationInProgress
+			);
+
+			// We call this extrinsic twice: to merge the registration and interaction data respectively.
+			if poll.state.registration_tree.subtree_root.is_none()
+			{
+				// Ensure that there was at least one registration.
+				let leaves = PollRegistrationHashes::<T>::get(&index);
+				ensure!(
+					leaves.len() > 0,
+					Error::<T>::PollDataEmpty
+				);
+
+				// Compute the root of the tree whose leaves are the hashes of the registration data.
+				let (root, subtree_root, subtree_depth) = compute_state_tree::<T>(leaves, poll.config.tree_arity.into());
+				// Update the poll state tree.
+				let state_tree = PollStateTree {
+					subtree_depth: subtree_depth,
+					subtree_root: subtree_root,
+					root: root
+				};
+				poll.state.registration_tree = state_tree.clone();
+				Polls::<T>::insert(&index, poll);
+
+				// Clear the hashes from storage.
+				PollRegistrationHashes::<T>::remove(&index);
+
+				// Emit the hash event.
+				Self::deposit_event(Event::PollStateMerged {
+					index: *index,
+					registration_tree: Some(state_tree),
+					interaction_tree: None
+				});
+			}
+			else if poll.state.interaction_tree.subtree_root.is_none()
+			{
+				// Check that the poll is not currenltly in the voting period.
+				ensure!(
+					!poll_in_voting_period(Some(poll.clone())),
+					Error::<T>::PollVotingInProgress
+				);
+
+				// Ensure that there was at least one interaction.
+				let leaves = PollInteractionHashes::<T>::get(&index);
+				ensure!(
+					leaves.len() > 0,
+					Error::<T>::PollDataEmpty
+				);
+
+				// Compute the root of the tree whose leaves are the hashes of the interaction data.
+				let (root, subtree_root, subtree_depth) = compute_state_tree::<T>(leaves, poll.config.tree_arity.into());
+
+				// Update the poll state tree.
+				let state_tree = PollStateTree {
+					subtree_depth: subtree_depth,
+					subtree_root: subtree_root,
+					root: root
+				};
+				poll.state.interaction_tree = state_tree.clone();
+				Polls::<T>::insert(&index, poll);
+
+				// Clear the hashes from storage.
+				PollInteractionHashes::<T>::remove(&index);
+
+				// Emit the hash event.
+				Self::deposit_event(Event::PollStateMerged {
+					index: *index,
+					registration_tree: None,
+					interaction_tree: Some(state_tree)
+				});
+			}
+
+			// Poll data has already been merged.
+			else { Err(<Error::<T>>::PollDataEmpty)? }
+
+			Ok(())
+		}
+
 		/// Permits a user to participate in an upcoming poll. Rejected if signup period has elapsed.
 		///
 		///	- `poll_id`: The id of the poll.
@@ -833,5 +942,92 @@ pub mod pallet
 		let voting_period_start = poll.created_at + poll.config.signup_period;
 		let voting_period_end = voting_period_start + poll.config.voting_period;
 		return now < voting_period_end;
+	}
+
+	fn hash_level(
+		nodes: vec::Vec<PoseidonHashBytes>,
+		arity: usize
+	) -> vec::Vec<PoseidonHashBytes> 
+	{
+		let capacity: usize = nodes.len().div_ceil(arity);
+		let mut parents = vec::Vec::<PoseidonHashBytes>::with_capacity(capacity);
+
+		let mut index = 0;
+		let mut subtree = vec::Vec::<BlsScalar>::with_capacity(arity);
+
+		// Hash each subtree of nodes respecting the provided tree arity
+		for leaf in nodes.iter()
+		{
+			subtree.push(BlsScalar::from_bytes(leaf).unwrap_or(BlsScalar::zero()));
+			index += 1;
+
+			if index % arity == 0
+			{
+				parents.push(sponge::hash(&subtree[..]).to_bytes());
+				subtree.clear();
+				index = 0;
+			}
+		}
+
+		// Fill the last subtree with zeros before hashing, if incomplete
+		if index != 0 && parents.len() < capacity
+		{
+			for _ in index..arity { subtree.push(BlsScalar::zero()); }
+			parents.push(sponge::hash(&subtree[..]).to_bytes());
+		}
+
+		parents
+	}
+
+	fn compute_subtree_root(
+		leaves: vec::Vec<PoseidonHashBytes>,
+		arity: usize
+	) -> (Option<PoseidonHashBytes>, u8)
+	{
+		let mut depth: u8 = 0;
+		let mut nodes = leaves;
+		
+		// Performs `ceil(log(leaves.len()))` iterations
+		while nodes.len() > 1
+		{
+			nodes = hash_level(nodes, arity);
+			depth += 1;
+		}
+
+		(nodes.first().copied(), depth)
+	}
+
+	fn compute_full_root<T: Config>(
+		subtree_root: Option<PoseidonHashBytes>,
+		subtree_depth: u8,
+		arity: usize
+	) -> Option<PoseidonHashBytes>
+	{ 
+		let max_depth = T::MaxTreeDepth::get();
+		if subtree_depth >= max_depth { return subtree_root }
+
+		let rem_depth = max_depth - subtree_depth;
+		let Some(_root) = subtree_root else { return None };
+		let mut root = BlsScalar::from_bytes(&_root).unwrap_or(BlsScalar::zero());
+
+		for _ in 0..rem_depth
+		{
+			let mut subtree = vec![BlsScalar::zero(); arity];
+			subtree[0] = root;
+			root = sponge::hash(&subtree);
+		}
+
+		Some(root.to_bytes())
+	}
+
+	fn compute_state_tree<T: Config>(
+		leaves: vec::Vec<PoseidonHashBytes>,
+		arity: usize
+	) -> (Option<PoseidonHashBytes>, Option<PoseidonHashBytes>, u8)
+	{
+		let (subtree_root, subtree_depth) = compute_subtree_root(leaves, arity);
+		let root = compute_full_root::<T>(subtree_root, subtree_depth, arity);
+
+		(root, subtree_root, subtree_depth)
 	}
 }
