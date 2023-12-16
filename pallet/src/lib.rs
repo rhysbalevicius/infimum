@@ -408,11 +408,11 @@ pub mod pallet
 	/// Map of coordinators to the poll IDs they manage.
 	#[pallet::storage]
 	#[pallet::getter(fn poll_ids)]
-	pub type CoordinatorPollIDs<T: Config> = StorageMap<
+	pub type CoordinatorPollIds<T: Config> = StorageMap<
 		_,
 		Blake2_128Concat,
 		T::AccountId,
-		Vec<PollId>,
+		vec::Vec<PollId>,
 		ValueQuery
 	>;
 
@@ -429,40 +429,34 @@ pub mod pallet
 		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
 		pub fn register_as_coordinator(
 			origin: OriginFor<T>,
-			public_key: Vec<u8>,
-			verify_key: Vec<u8>
+			public_key: PublicKey,
+			verify_key: vec::Vec<u8>
 		) -> DispatchResult
 		{
-			// TODO (rb) should we permit the pallet to be configured such that only `sudo` may register coordinators? 
-
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
-			
+
+			let verify_key: VerifyKey<T> = verify_key
+				.try_into()
+				.map_err(|_| Error::<T>::MalformedVerifyKey)?;
+
 			// A coordinator may only be registered once.
 			ensure!(
 				!Coordinators::<T>::contains_key(&sender), 
 				Error::<T>::CoordinatorAlreadyRegistered
 			);
 
-			// Validate the key provided, throw if it fails
-			// TODO (rb) verify that the public key is well defined
-			// TODO (rb) split out verification logic into helper fn
-			let pk: CoordinatorPublicKeyDef<T> = public_key
-				.try_into()
-				.map_err(|_| Error::<T>::CoordinatorPublicKeyTooLong)?;
-
-			let vk: CoordinatorVerifyKeyDef<T> = verify_key
-				.try_into()
-				.map_err(|_| Error::<T>::CoordinatorVerifyKeyTooLong)?;
-
 			// Store the coordinator keys.
 			Coordinators::<T>::insert(&sender, Coordinator {
-				public_key: pk,
-				verify_key: vk
+				public_key: public_key.clone(),
+				verify_key
 			});
 
 			// Emit a registration event
-			Self::deposit_event(Event::CoordinatorRegistered { who: sender });
+			Self::deposit_event(Event::CoordinatorRegistered {
+				who: sender,
+				public_key
+			});
 			
 			// Coordinator was successfully registered.
 			Ok(())
@@ -475,54 +469,39 @@ pub mod pallet
 		///
 		/// Emits `CoordinatorKeyChanged`.
 		#[pallet::call_index(1)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(4, 1))]
+		#[pallet::weight(T::DbWeight::get().reads_writes(3, 1))]
 		pub fn rotate_public_key(
 			origin: OriginFor<T>,
-			public_key: Vec<u8>
+			public_key: PublicKey
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
 			// Check if origin is registered as a coordinator.
-			ensure!(
-				Coordinators::<T>::contains_key(&sender), 
-				Error::<T>::CoordinatorNotRegistered
-			);
+			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
 
-			// Check that a poll is not currently in progress.
+			// Check that a poll is not currently in progress, if it exists.
 			let coord_poll_ids = Self::poll_ids(&sender);
 			let last_poll_index = coord_poll_ids.last();
 			if let Some(index) = last_poll_index
 			{
 				ensure!(
-					!poll_in_signup(Polls::<T>::get(index)),
-					Error::<T>::PollOngoing
+					!poll_in_voting_period(Polls::<T>::get(index)),
+					Error::<T>::PollVotingInProgress
 				);
 			}
 
-			// TODO (rb) Validate the key provided, throw if it fails
-			let pk: CoordinatorPublicKeyDef<T> = public_key
-				.try_into()
-				.map_err(|_| Error::<T>::CoordinatorPublicKeyTooLong)?;
-
-			// let vk: CoordinatorVerifyKeyDef<T> = verify_key
-				// .try_into()
-				// .map_err(|_| Error::<T>::CoordinatorVerifyKeyTooLong)?;
-
-			if let Some(coordinator) = Coordinators::<T>::get(&sender)
-			{
-				// Store the coordinators updated public key.
-				Coordinators::<T>::insert(&sender, Coordinator {
-					public_key: pk.clone(),
-					verify_key: coordinator.verify_key
-				});
-			} 
-
+			// Store the coordinators updated public key.
+			Coordinators::<T>::insert(&sender, Coordinator {
+				public_key: public_key.clone(),
+				verify_key: coordinator.verify_key
+			});
+	
 			// Emit the key rotation event.
 			Self::deposit_event(Event::CoordinatorKeyChanged {
 				who: sender,
-				public_key: Some(pk),
+				public_key: Some(public_key),
 				verify_key: None
 			});
 
