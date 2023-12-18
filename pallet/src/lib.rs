@@ -776,6 +776,78 @@ pub mod pallet
 			Ok(())
 		}
 
+		// /// Verifies the proof that the current batch of messages have been correctly processed and, if successful, updates
+		// /// the current verification state. Rejected if called prior to the merge of poll state.
+		// /// Verifies the proof that the current batch of votes has been correctly tallied and, if successful, updates the 
+		// /// current verification state. Rejected if messages have not yet been processed. On verification of the final
+		// /// batch the poll result is recorded in storage and an event is emitted containing the result. Rejected if called
+		// /// before poll end.
+
+		/// TODO (M1) write header
+		///
+		/// - `batches`: ...
+		/// - `outcome`: The index of the option in VoteOptions. Include only with the last batch, or after the last batch has been verified.
+		/// 
+		/// Emits `PollOutcome` once the final batch has been verified.
+		#[pallet::call_index(5)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(3, 1))]
+		pub fn commit_outcome(
+			origin: OriginFor<T>,
+			batches: vec::Vec<(ProofData, CommitmentData)>,
+			outcome: Option<u32>
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			let sender = ensure_signed(origin)?;
+
+			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+
+			// Get the coordinators most recent poll.
+			// TODO (M1) store this on the coordinator?
+			let coord_poll_ids = Self::poll_ids(&sender);
+			let last_poll_index = coord_poll_ids.last();
+
+			let Some(index) = last_poll_index else { Err(<Error::<T>>::PollDoesNotExist)? };
+			let Some(mut poll) = Polls::<T>::get(index) else { Err(<Error::<T>>::PollDoesNotExist)? };
+
+			ensure!(
+				poll.state.outcome.is_none(),
+				Error::<T>::PollOutcomeAlreadyCommitted
+			);
+
+			// Verify each batch of proofs, in order.
+			for (proof, commitment) in batches.iter()
+			{
+				ensure!(
+					verify_proof(
+						poll.clone(),
+						coordinator.verify_key.clone(),
+						*proof,
+						*commitment
+					),
+					Error::<T>::MalformedProof
+				);
+				// poll.state.num_witnessed += 1;
+				// poll.state.commitment = *commitment;
+			}
+
+			// Once the final batch is verified, we verify that the outcome matches the final commitment
+			if let Some(outcome) = verify_outcome(poll.clone(), outcome)
+			{
+				poll.state.outcome = Some(outcome);
+
+				Self::deposit_event(Event::PollOutcome { 
+					index: *index,
+					outcome
+				});
+			}
+
+			// Commit the 
+			Polls::<T>::insert(index, poll);
+
+			Ok(())
+		}
+
 		/// Permits a user to participate in an upcoming poll. Rejected if signup period has elapsed.
 		///
 		///	- `poll_id`: The id of the poll.
@@ -1029,5 +1101,30 @@ pub mod pallet
 		let root = compute_full_root::<T>(subtree_root, subtree_depth, arity);
 
 		(root, subtree_root, subtree_depth)
+	}
+
+	// ==========================================
+	// TODO (M2) 
+	fn verify_proof<T: Config>(
+		_poll_data: Poll<T, PollId>,
+		_verify_key: VerifyKey<T>,
+		_proof_data: ProofData,
+		_commitment: CommitmentData
+	) -> bool
+	{
+		true
+	}
+	fn verify_outcome<T: Config>(
+		poll_data: Poll<T, PollId>,
+		index: Option<u32>
+	) -> Option<u128>
+	{
+		let Some(index) = index else { return None };
+		if (index as usize) < poll_data.config.vote_options.len()
+		{
+			return Some(poll_data.config.vote_options[index as usize]);
+		}
+
+		None
 	}
 }
