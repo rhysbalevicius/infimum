@@ -187,6 +187,9 @@ pub mod pallet
 		/// Poll voting period is in progress.
 		PollVotingInProgress,
 
+		/// Poll has not ended.
+		PollHasNotEnded,
+
 		/// Poll has ended and may no longer be interacted with by participants.
 		PollVotingHasEnded,
 
@@ -393,7 +396,10 @@ pub mod pallet
 		pub public_key: PublicKey,
 
 		/// The coordinators verify key.
-		pub verify_key: VerifyKey<T>
+		pub verify_key: VerifyKey<T>,
+
+		/// The coordinators most recent poll (may be active).
+		pub last_poll: Option<PollId>
 	}
 
 	/// Map of coordinators to their keys.
@@ -448,6 +454,7 @@ pub mod pallet
 
 			// Store the coordinator keys.
 			Coordinators::<T>::insert(&sender, Coordinator {
+				last_poll: None,
 				public_key: public_key.clone(),
 				verify_key
 			});
@@ -469,7 +476,7 @@ pub mod pallet
 		///
 		/// Emits `CoordinatorKeyChanged`.
 		#[pallet::call_index(1)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(3, 1))]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
 		pub fn rotate_public_key(
 			origin: OriginFor<T>,
 			public_key: PublicKey
@@ -479,12 +486,10 @@ pub mod pallet
 			let sender = ensure_signed(origin)?;
 
 			// Check if origin is registered as a coordinator.
-			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+			let Some(mut coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
 
-			// Check that a poll is not currently in progress, if it exists.
-			let coord_poll_ids = Self::poll_ids(&sender);
-			let last_poll_index = coord_poll_ids.last();
-			if let Some(index) = last_poll_index
+			// Check that the coordinator's most recent poll is not currently in progress, if it exists.
+			if let Some(index) = coordinator.last_poll
 			{
 				ensure!(
 					!poll_in_voting_period(Polls::<T>::get(index)),
@@ -492,11 +497,9 @@ pub mod pallet
 				);
 			}
 
-			// Store the coordinators updated public key.
-			Coordinators::<T>::insert(&sender, Coordinator {
-				public_key: public_key.clone(),
-				verify_key: coordinator.verify_key
-			});
+			// Update and store the coordinators updated public key.
+			coordinator.public_key = public_key.clone();
+			Coordinators::<T>::insert(&sender, coordinator);
 	
 			// Emit the key rotation event.
 			Self::deposit_event(Event::CoordinatorKeyChanged {
@@ -515,7 +518,7 @@ pub mod pallet
 		///
 		/// Emits `CoordinatorKeyChanged`.
 		#[pallet::call_index(2)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(3, 1))]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
 		pub fn rotate_verify_key(
 			origin: OriginFor<T>,
 			verify_key: vec::Vec<u8>
@@ -529,12 +532,10 @@ pub mod pallet
 				.map_err(|_| Error::<T>::MalformedVerifyKey)?;
 
 			// Check if origin is registered as a coordinator.
-			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+			let Some(mut coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
 
-			// Check that a poll is not currently in progress, if it exists.
-			let coord_poll_ids = Self::poll_ids(&sender);
-			let last_poll_index = coord_poll_ids.last();
-			if let Some(index) = last_poll_index
+			// Check that the coordinator's most recent poll is not currently in progress, if it exists.
+			if let Some(index) = coordinator.last_poll
 			{
 				ensure!(
 					!poll_in_voting_period(Polls::<T>::get(index)),
@@ -542,11 +543,9 @@ pub mod pallet
 				);
 			}
 
-			// Store the coordinators updated public key.
-			Coordinators::<T>::insert(&sender, Coordinator {
-				public_key: coordinator.public_key,
-				verify_key: verify_key.clone()
-			});
+			// Update and store the coordinators updated verification key.
+			coordinator.verify_key = verify_key.clone();
+			Coordinators::<T>::insert(&sender, coordinator);
 
 			// Emit the key rotation event.
 			Self::deposit_event(Event::CoordinatorKeyChanged {
@@ -570,7 +569,7 @@ pub mod pallet
 		///
 		/// Emits `PollCreated`.
 		#[pallet::call_index(3)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(5, 2))]
+		#[pallet::weight(T::DbWeight::get().reads_writes(4, 3))]
 		pub fn create_poll(
 			origin: OriginFor<T>,
 			signup_period: Duration,
@@ -600,10 +599,7 @@ pub mod pallet
 				.map_err(|_| Error::<T>::PollConfigInvalid)?;
 
 			// Check that sender is registered as a coordinator.
-			ensure!(
-				Coordinators::<T>::contains_key(&sender), 
-				Error::<T>::CoordinatorNotRegistered
-			);
+			let Some(mut coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
 
 			let coord_poll_ids = Self::poll_ids(&sender);
 
@@ -622,7 +618,7 @@ pub mod pallet
 					// Reject if last created poll is on-going.
 					ensure!(
 						poll_is_over(poll.clone()),
-						Error::<T>::PollMissingOutcome
+						Error::<T>::PollHasNotEnded 
 					);
 	
 					// Reject if last created poll has not been processed.
@@ -651,6 +647,9 @@ pub mod pallet
 					batch_size
 				}
 			});
+
+			coordinator.last_poll = Some(index);
+			Coordinators::<T>::insert(&sender, coordinator);
 			CoordinatorPollIds::<T>::append(&sender, index);
 
 			// Emit the creation event.
@@ -674,7 +673,7 @@ pub mod pallet
 		///
 		/// Emits `PollStateMerged`.
 		#[pallet::call_index(4)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(4, 2))] 
+		#[pallet::weight(T::DbWeight::get().reads_writes(3, 2))] 
 		pub fn merge_poll_state(
 			origin: OriginFor<T>
 		) -> DispatchResult
@@ -682,17 +681,9 @@ pub mod pallet
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 			
-			// Check that origin is registered as a coordinator
-			ensure!(
-				Coordinators::<T>::contains_key(&sender), 
-				Error::<T>::CoordinatorNotRegistered
-			);
-
 			// Get the coordinators most recent poll.
-			let coord_poll_ids = Self::poll_ids(&sender);
-			let last_poll_index = coord_poll_ids.last();
-
-			let Some(index) = last_poll_index else { Err(<Error::<T>>::PollDoesNotExist)? };
+			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+			let Some(index) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
 			let Some(mut poll) = Polls::<T>::get(index) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
 			// Check that the poll is not currently in the registration period.
@@ -727,7 +718,7 @@ pub mod pallet
 
 				// Emit the hash event.
 				Self::deposit_event(Event::PollStateMerged {
-					index: *index,
+					index,
 					registration_tree: Some(state_tree),
 					interaction_tree: None
 				});
@@ -764,7 +755,7 @@ pub mod pallet
 
 				// Emit the hash event.
 				Self::deposit_event(Event::PollStateMerged {
-					index: *index,
+					index,
 					registration_tree: None,
 					interaction_tree: Some(state_tree)
 				});
@@ -790,7 +781,7 @@ pub mod pallet
 		/// 
 		/// Emits `PollOutcome` once the final batch has been verified.
 		#[pallet::call_index(5)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(3, 1))]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
 		pub fn commit_outcome(
 			origin: OriginFor<T>,
 			batches: vec::Vec<(ProofData, CommitmentData)>,
@@ -800,14 +791,9 @@ pub mod pallet
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
-
 			// Get the coordinators most recent poll.
-			// TODO (M1) store this on the coordinator?
-			let coord_poll_ids = Self::poll_ids(&sender);
-			let last_poll_index = coord_poll_ids.last();
-
-			let Some(index) = last_poll_index else { Err(<Error::<T>>::PollDoesNotExist)? };
+			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+			let Some(index) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
 			let Some(mut poll) = Polls::<T>::get(index) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
 			ensure!(
@@ -827,6 +813,7 @@ pub mod pallet
 					),
 					Error::<T>::MalformedProof
 				);
+				// TODO (M1)
 				// poll.state.num_witnessed += 1;
 				// poll.state.commitment = *commitment;
 			}
@@ -837,12 +824,12 @@ pub mod pallet
 				poll.state.outcome = Some(outcome);
 
 				Self::deposit_event(Event::PollOutcome { 
-					index: *index,
+					index,
 					outcome
 				});
 			}
 
-			// Commit the 
+			// Update the poll state.
 			Polls::<T>::insert(index, poll);
 
 			Ok(())
@@ -933,7 +920,7 @@ pub mod pallet
 		///
 		/// Emits `PollInteraction`.
 		#[pallet::call_index(7)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(2, 2))]
+		#[pallet::weight(T::DbWeight::get().reads_writes(1, 2))]
 		pub fn interact_with_poll(
 			origin: OriginFor<T>,
 			poll_id: PollId,
