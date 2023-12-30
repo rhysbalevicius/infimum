@@ -16,10 +16,12 @@ pub mod benchmarking;
 type PollId = u32;
 type Timestamp = u64;
 type Duration = Timestamp;
-type PoseidonHashBytes = [u8; 32];
+type HashBytes = [u8; 32];
 type PollInteractionData = [[u64; 4]; 16]; 
 type ProofData = [[u64; 4]; 16];
-type CommitmentData = PoseidonHashBytes;
+type CommitmentData = HashBytes;
+type CommitmentIndex = u32;
+type Commitment = (CommitmentIndex, CommitmentData);
 type VerifyKey<T> = BoundedVec<u8, <T as Config>::MaxVerifyKeyLength>;
 type VoteOptions<T> = BoundedVec<u128, <T as Config>::MaxVoteOptions>;
 
@@ -251,7 +253,7 @@ pub mod pallet
 		num_witnessed: u32,
 
 		/// The current proof commitment.
-		commitment: (u32, [u8; 32]),
+		commitment: Commitment,
 
 		/// The final result of the poll.
 		outcome: Option<u128>,
@@ -263,14 +265,14 @@ pub mod pallet
 		/// The depth of the subtree.
 		subtree_depth: u8,
 
-		// TODO (M1) replace `PollRegistrationHashes` and `PollInteractionHashes` storage with single BoundedVec here
-		// subtree_hashes: vec::Vec<[u8; 32]>,
+		/// The hashes of the incrementally merged subtree.
+		subtree_hashes: vec::Vec<HashBytes>,
 
 		/// The subroot of the tree.
-		subtree_root: Option<PoseidonHashBytes>,
+		subtree_root: Option<HashBytes>,
 
 		/// The root of the "full"-depth tree containing `subtree_root` and zeros elsewhere.
-		root: Option<PoseidonHashBytes>,
+		root: Option<HashBytes>,
 	}
 
 	impl Default for PollStateTree
@@ -280,6 +282,7 @@ pub mod pallet
 			PollStateTree {
 				subtree_depth: 0,
 				subtree_root: None,
+				subtree_hashes: vec::Vec::<HashBytes>::new(),
 				root: None
 			}
 		}
@@ -355,26 +358,6 @@ pub mod pallet
 		Twox64Concat,
 		PollId,
 		Poll<T, PollId>
-	>;
-
-	/// Ephemeral map of poll id to the hashes of registration data.
-	#[pallet::storage]
-	pub type PollRegistrationHashes<T: Config> = StorageMap<
-		_,
-		Twox64Concat,
-		PollId,
-		vec::Vec<PoseidonHashBytes>,
-		ValueQuery
-	>;
-
-	/// Ephemeral map of poll id to the hashes of voting data.
-	#[pallet::storage]
-	pub type PollInteractionHashes<T: Config> = StorageMap<
-		_,
-		Twox64Concat,
-		PollId,
-		vec::Vec<PoseidonHashBytes>,
-		ValueQuery
 	>;
 
 	/// Map of account ids to the polls they've registered for.
@@ -696,25 +679,25 @@ pub mod pallet
 			if poll.state.registration_tree.subtree_root.is_none()
 			{
 				// Ensure that there was at least one registration.
-				let leaves = PollRegistrationHashes::<T>::get(&index);
 				ensure!(
-					leaves.len() > 0,
+					poll.state.registration_tree.subtree_hashes.len() > 0,
 					Error::<T>::PollDataEmpty
 				);
 
 				// Compute the root of the tree whose leaves are the hashes of the registration data.
-				let (root, subtree_root, subtree_depth) = compute_state_tree::<T>(leaves, poll.config.tree_arity.into());
+				let (root, subtree_root, subtree_depth) = compute_state_tree::<T>(
+					poll.state.registration_tree.subtree_hashes,
+					poll.config.tree_arity.into()
+				);
 				// Update the poll state tree.
 				let state_tree = PollStateTree {
+					subtree_hashes: vec![],
 					subtree_depth: subtree_depth,
 					subtree_root: subtree_root,
 					root: root
 				};
 				poll.state.registration_tree = state_tree.clone();
 				Polls::<T>::insert(&index, poll);
-
-				// Clear the hashes from storage.
-				PollRegistrationHashes::<T>::remove(&index);
 
 				// Emit the hash event.
 				Self::deposit_event(Event::PollStateMerged {
@@ -732,26 +715,26 @@ pub mod pallet
 				);
 
 				// Ensure that there was at least one interaction.
-				let leaves = PollInteractionHashes::<T>::get(&index);
 				ensure!(
-					leaves.len() > 0,
+					poll.state.interaction_tree.subtree_hashes.len() > 0,
 					Error::<T>::PollDataEmpty
 				);
 
 				// Compute the root of the tree whose leaves are the hashes of the interaction data.
-				let (root, subtree_root, subtree_depth) = compute_state_tree::<T>(leaves, poll.config.tree_arity.into());
+				let (root, subtree_root, subtree_depth) = compute_state_tree::<T>(
+					poll.state.interaction_tree.subtree_hashes,
+					poll.config.tree_arity.into()
+				);
 
 				// Update the poll state tree.
 				let state_tree = PollStateTree {
+					subtree_hashes: vec![],
 					subtree_depth: subtree_depth,
 					subtree_root: subtree_root,
 					root: root
 				};
 				poll.state.interaction_tree = state_tree.clone();
 				Polls::<T>::insert(&index, poll);
-
-				// Clear the hashes from storage.
-				PollInteractionHashes::<T>::remove(&index);
 
 				// Emit the hash event.
 				Self::deposit_event(Event::PollStateMerged {
@@ -879,24 +862,29 @@ pub mod pallet
 				poll.state.num_participants < poll.config.max_participants,
 				Error::<T>::ParticipantRegistrationLimitReached
 			);
+				
+			// Record the hash of the registration data
+			let timestamp = T::TimeProvider::now().as_secs();
+			poll.state.registration_tree.subtree_hashes.push(
+				sponge::hash(&vec![
+					BlsScalar(public_key.x),
+					BlsScalar(public_key.y),
+					BlsScalar::one(),
+					BlsScalar::from(timestamp)
+				]).to_bytes()
+			);
 
+			// Increment the number of interactions.
+			poll.state.num_interactions = poll.state.num_interactions + 1;
+			
 			// Increment the number of participants.
 			let count = poll.state.num_participants + 1;
 			poll.state.num_participants = count;
+
 			Polls::<T>::insert(&poll_id, poll);
 
 			// Mark the signer as having registered in this poll.
 			PollsParticipatingIn::<T>::append(&sender, &poll_id);
-				
-			// Record the hash of the registration data
-			let timestamp = T::TimeProvider::now().as_secs();
-			let leaf_hash = sponge::hash(&vec![
-				BlsScalar(public_key.x),
-				BlsScalar(public_key.y),
-				BlsScalar::one(),
-				BlsScalar::from(timestamp)
-			]);
-			PollRegistrationHashes::<T>::append(&poll_id, leaf_hash.to_bytes());
 
 			Self::deposit_event(Event::ParticipantRegistered { 
 				poll_id,
@@ -929,7 +917,7 @@ pub mod pallet
 		) -> DispatchResult
 		{
 			// Ensure that the extrinsic was signed.
-			let _ = ensure_signed(origin)?;
+			ensure_signed(origin)?;
 
 			// Ensure that the poll exists.
 			let Some(mut poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
@@ -950,13 +938,13 @@ pub mod pallet
 			let mut leaf_data = data.map(|x| BlsScalar(x)).to_vec();
 			leaf_data.push(BlsScalar(public_key.x));
 			leaf_data.push(BlsScalar(public_key.y));
-			PollRegistrationHashes::<T>::append(
-				&poll_id,
-				sponge::hash(&leaf_data).to_bytes()
-			);
+
+			// Insert the leaf into the state tree.
+			poll.state.interaction_tree.subtree_hashes.push(sponge::hash(&leaf_data).to_bytes());
 
 			// Increment the number of interactions.
 			poll.state.num_interactions = poll.state.num_interactions + 1;
+			
 			Polls::<T>::insert(&poll_id, poll);
 
 			Self::deposit_event(Event::PollInteraction { 
@@ -1004,12 +992,12 @@ pub mod pallet
 	}
 
 	fn hash_level(
-		nodes: vec::Vec<PoseidonHashBytes>,
+		nodes: vec::Vec<HashBytes>,
 		arity: usize
-	) -> vec::Vec<PoseidonHashBytes> 
+	) -> vec::Vec<HashBytes> 
 	{
 		let capacity: usize = nodes.len().div_ceil(arity);
-		let mut parents = vec::Vec::<PoseidonHashBytes>::with_capacity(capacity);
+		let mut parents = vec::Vec::<HashBytes>::with_capacity(capacity);
 
 		let mut index = 0;
 		let mut subtree = vec::Vec::<BlsScalar>::with_capacity(arity);
@@ -1039,9 +1027,9 @@ pub mod pallet
 	}
 
 	fn compute_subtree_root(
-		leaves: vec::Vec<PoseidonHashBytes>,
+		leaves: vec::Vec<HashBytes>,
 		arity: usize
-	) -> (Option<PoseidonHashBytes>, u8)
+	) -> (Option<HashBytes>, u8)
 	{
 		let mut depth: u8 = 0;
 		let mut nodes = leaves;
@@ -1057,10 +1045,10 @@ pub mod pallet
 	}
 
 	fn compute_full_root<T: Config>(
-		subtree_root: Option<PoseidonHashBytes>,
+		subtree_root: Option<HashBytes>,
 		subtree_depth: u8,
 		arity: usize
-	) -> Option<PoseidonHashBytes>
+	) -> Option<HashBytes>
 	{ 
 		let max_depth = T::MaxTreeDepth::get();
 		if subtree_depth >= max_depth { return subtree_root }
@@ -1080,9 +1068,9 @@ pub mod pallet
 	}
 
 	fn compute_state_tree<T: Config>(
-		leaves: vec::Vec<PoseidonHashBytes>,
+		leaves: vec::Vec<HashBytes>,
 		arity: usize
-	) -> (Option<PoseidonHashBytes>, Option<PoseidonHashBytes>, u8)
+	) -> (Option<HashBytes>, Option<HashBytes>, u8)
 	{
 		let (subtree_root, subtree_depth) = compute_subtree_root(leaves, arity);
 		let root = compute_full_root::<T>(subtree_root, subtree_depth, arity);
