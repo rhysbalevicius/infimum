@@ -4850,7 +4850,7 @@ dependencies = [
  "frame-benchmarking",
  "frame-support",
  "frame-system",
- "group 0.12.1",
+ "group 0.13.0",
  "pairing",
  "parity-scale-codec",
  "scale-info",
