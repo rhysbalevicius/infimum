@@ -25,7 +25,7 @@ pairing = "0.22.0"
 group = "0.12.1"
 serde = { version = "1.0.149", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1.0.89", default-features = false, features = ["alloc"]}
-uint = { version = "0.8", default-features = false }
+uint = { version = "0.9", default-features = false }
 sp-std = { version = "8.0.0", default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
 sp-io = { version = "23.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
 sp-runtime = { version = "24.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
