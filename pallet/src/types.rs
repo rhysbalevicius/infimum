@@ -1,6 +1,7 @@
 use sp_std::vec;
 use frame_support::pallet_prelude::*;
-use super::{VoteOptions, VerifyKey};
+use dusk_bls12_381::BlsScalar;
+use dusk_poseidon::sponge;
 
 pub type PollId = u32;
 pub type Timestamp = u64;
@@ -11,6 +12,8 @@ pub type ProofData = [[u64; 4]; 16];
 pub type CommitmentData = HashBytes;
 pub type CommitmentIndex = u32;
 pub type Commitment = (CommitmentIndex, CommitmentData);
+pub type VerifyKey<T> = BoundedVec<u8, <T as crate::Config>::MaxVerifyKeyLength>;
+pub type VoteOptions<T> = BoundedVec<u128, <T as crate::Config>::MaxVoteOptions>;
 
 /// Coordinator storage definition.
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
@@ -88,21 +91,20 @@ pub struct PollState
     pub outcome: Option<u128>,
 }
 
-/// ...
-#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
-pub struct PollStateTree
+impl Default for PollState 
 {
-    /// The depth of the subtree.
-    pub subtree_depth: u8,
-
-    /// The hashes of the incrementally merged subtree.
-    pub subtree_hashes: vec::Vec<HashBytes>,
-
-    /// The subroot of the tree.
-    pub subtree_root: Option<HashBytes>,
-
-    /// The root of the "full"-depth tree containing `subtree_root` and zeros elsewhere.
-    pub root: Option<HashBytes>,
+    fn default() -> PollState 
+    {
+        PollState {
+            num_participants: 0,
+            num_interactions: 0,
+            num_witnessed: 0,
+            registration_tree: PollStateTree::default(),
+            interaction_tree: PollStateTree::default(),
+            commitment: (0, [0; 32]),
+            outcome: None
+        }
+    }
 }
 
 /// ...
@@ -129,20 +131,25 @@ pub struct PollConfiguration<T: crate::Config>
     pub tree_arity: u8
 }
 
-impl Default for PollState 
+/// ...
+#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+pub struct PollStateTree
 {
-    fn default() -> PollState 
-    {
-        PollState {
-            num_participants: 0,
-            num_interactions: 0,
-            num_witnessed: 0,
-            registration_tree: PollStateTree::default(),
-            interaction_tree: PollStateTree::default(),
-            commitment: (0, [0; 32]),
-            outcome: None
-        }
-    }
+    /// The arity of the tree.
+    pub arity: u8,
+
+    /// The depth of the subtree.
+    pub depth: u32,
+
+    /// The number of non-nil leaves.
+    pub count: u32,
+
+    /// The (depth, hash) pairs of the incrementally merged subtree.
+    pub hashes: vec::Vec<(u32, HashBytes)>,
+
+    /// The root of the tree of depth `T::MaxTreeDepth` which contains
+    /// the leaves of `hashes` and zeros elsewhere.
+    pub root: Option<HashBytes>
 }
 
 impl Default for PollStateTree
@@ -150,10 +157,77 @@ impl Default for PollStateTree
     fn default() -> PollStateTree
     {
         PollStateTree {
-            subtree_depth: 0,
-            subtree_root: None,
-            subtree_hashes: vec::Vec::<HashBytes>::new(),
+            arity: 2,
+            depth: 0,
+            count: 0,
+            hashes: vec::Vec::<(u32, HashBytes)>::new(),
             root: None
         }
     }
+}
+
+trait PartialMerkleStack<T: crate::Config>
+{
+    /// Inserts a new leaf into the tree.
+    fn insert(self, data: BlsScalar) -> Self; // TODO `data` should be generic 
+
+    
+}
+
+impl<T: crate::Config> PartialMerkleStack<T> for PollStateTree
+{
+    /// Consume a new leaf and produce the resultant partial merkle tree.
+    /// NB This function trades off extrinsic weight for storage space. 
+    ///    You can tune the proportion to which we make this trade-off by
+    ///	   configuring the constant `MaxIterationDepth`.
+    ///
+    /// -`data`: A new right-most leaf to insert into the tree.
+    ///
+    fn insert(
+        mut self,
+        data: BlsScalar
+    ) -> Self
+    {
+        // These elements look like: (depth, hash)
+        let mut hashes: vec::Vec<(u32, BlsScalar)> = self.hashes
+            .iter()
+            .map(|(depth, hash_bytes)| (*depth, BlsScalar::from_bytes(hash_bytes).unwrap_or(BlsScalar::zero())))
+            .collect();
+        
+        hashes.push((1, data));
+
+        // Hash `arity` hashes of equivalent depth until either the depth is exhausted,
+        // or there are insufficiently many right-most hashes of equal depth. 
+        let arity: usize = self.arity.into();
+        let mut depth: u32 = 1;
+        loop
+        {
+            // Guard against the maximal hash depth that can be reached from any individual `insert` operation
+            if depth > T::MaxIterationDepth::get() { break; }
+
+            let size = hashes.len();
+            if size < arity { break; }
+
+            // Find the index of the first item with a different depth
+            let Some(index) = hashes.iter().rposition(|(d,_)| *d != depth) else { break };
+            if index + arity != size - 1 { break };
+
+            let subtree: vec::Vec<BlsScalar> = hashes
+                .split_off(size.saturating_sub(arity))
+                .iter()
+                .map(|(_d,h)| *h)
+                .collect();
+
+            depth += 1;
+            hashes.push((depth, sponge::hash(&subtree)));
+        }
+
+        if let Some(hash) = hashes.first() { self.depth = hash.0; }
+        self.hashes = hashes.iter().map(|(d, h)| (*d, h.to_bytes())).collect();
+        self.count += 1;
+
+        self
+    }
+
+    
 }
