@@ -2,11 +2,13 @@
 
 pub use pallet::*;
 use sp_std::vec;
+
 use frame_support::traits::UnixTime;
 use dusk_bls12_381::BlsScalar;
+use dusk_poseidon::sponge;
 
-use types::*;
 pub mod types;
+pub use types::*;
 
 #[cfg(test)]
 mod tests;
@@ -117,19 +119,7 @@ pub mod pallet
 			/// The block number the poll signup period ends and voting commences.
 			starts_at: Timestamp,
 			/// The block number the voting period commences.
-			ends_at: Timestamp,
-			/// Optional metadata associated with poll.
-			metadata: Option<T::Hash>
-		},
-
-		/// Poll state has been merged.
-		PollStateMerged {
-			/// The poll index.
-			index: PollId,
-			/// The poll registration tree.
-			registration_tree: Option<PollStateTree>,
-			/// The poll interaction tree.
-			interaction_tree: Option<PollStateTree>
+			ends_at: Timestamp
 		},
 
 		/// Poll was interacted with.
@@ -166,9 +156,6 @@ pub mod pallet
 
 		/// Maximum number of interactions have committed.
 		ParticipantInteractionLimitReached,
-
-		/// Participant is already registered in the poll.
-		ParticipantAlreadyRegistered,
 
 		/// Poll config is invalid.
 		PollConfigInvalid,
@@ -223,16 +210,6 @@ pub mod pallet
 		Twox64Concat,
 		PollId,
 		Poll<T>
-	>;
-
-	/// Map of account ids to the polls they've registered for.
-	#[pallet::storage]
-	pub type PollsParticipatingIn<T: Config> = StorageMap<
-		_, 
-		Twox64Concat,
-		T::AccountId,
-		vec::Vec<PollId>,
-		ValueQuery
 	>;
 
 	/// Map of coordinators to their keys.
@@ -394,7 +371,7 @@ pub mod pallet
 		///
 		/// - `signup_period`: The poll signup duration (in ms).
 		/// - `voting_period`: The poll voting duration (in ms).
-		/// - `max_participants`: The maximum number of participants permitted.
+		/// - `max_registrations`: The maximum number of participants permitted.
 		/// - `vote_options`: The possible outcomes of the poll.
 		/// - `tree_arity`: The arity of the state trees.
 		/// - `batch_size`: 
@@ -407,11 +384,9 @@ pub mod pallet
 			origin: OriginFor<T>,
 			signup_period: Duration,
 			voting_period: Duration,
-			max_participants: u32,
+			max_registrations: u32,
 			vote_options: vec::Vec<u128>,
-			tree_arity: u8,
-			batch_size: u8,
-			metadata: Option<T::Hash>
+			tree_arity: u8
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
@@ -420,7 +395,7 @@ pub mod pallet
 			// Validate config parameters.
 			ensure!(
 				(
-					max_participants <= T::MaxPollRegistrations::get() &&
+					max_registrations <= T::MaxPollRegistrations::get() &&
 					tree_arity <= T::MaxTreeArity::get() &&
 					tree_arity >= T::MinTreeArity::get()
 				),
@@ -468,16 +443,14 @@ pub mod pallet
 			Polls::<T>::insert(&index, Poll {
 				index,
 				created_at,
-				metadata,
 				coordinator: sender.clone(),
 				state: PollState::default(),
 				config: PollConfiguration {
 					signup_period,
 					voting_period,
-					max_participants,
+					max_registrations,
 					vote_options,
-					tree_arity,
-					batch_size
+					tree_arity
 				}
 			});
 
@@ -492,8 +465,7 @@ pub mod pallet
 				coordinator: sender,
 				index,
 				starts_at,
-				ends_at,
-				metadata
+				ends_at
 			});
 
 			Ok(())
@@ -691,13 +663,6 @@ pub mod pallet
 				Error::<T>::CoordinatorNotRegistered
 			);
 
-			// Check that the signer has not previously submitted a registration for this poll.
-			let participants = PollsParticipatingIn::<T>::get(&sender);
-			ensure!(
-				!participants.contains(&poll_id),
-				Error::<T>::ParticipantAlreadyRegistered
-			);
-
 			// Ensure that the poll exists.
 			let Some(mut poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
@@ -709,32 +674,28 @@ pub mod pallet
 
 			// Check that the maximum number of sign-ups has not been reached.
 			ensure!(
-				poll.state.num_participants < poll.config.max_participants,
+				!poll.registration_limit_reached(),
 				Error::<T>::ParticipantRegistrationLimitReached
 			);
-				
-			// Record the hash of the registration data
+
+			// Record the hash of the registration data.
 			let timestamp = T::TimeProvider::now().as_secs();
-			// poll.state.registration_tree.subtree_hashes.push(
-			// 	sponge::hash(&vec![
-			// 		BlsScalar(public_key.x),
-			// 		BlsScalar(public_key.y),
-			// 		BlsScalar::one(),
-			// 		BlsScalar::from(timestamp)
-			// 	]).to_bytes()
-			// );
-
-			// Increment the number of interactions.
-			poll.state.num_interactions = poll.state.num_interactions + 1;
 			
-			// Increment the number of participants.
-			let count = poll.state.num_participants + 1;
-			poll.state.num_participants = count;
+			// Update the registration data container.
+			let poll = poll.register_participant(
+				sponge::hash(&vec![
+					BlsScalar(public_key.x),
+					BlsScalar(public_key.y),
+					BlsScalar::one(),
+					BlsScalar::from(timestamp)
+				])
+			);
+			let count = poll.registration_count();
 
-			Polls::<T>::insert(&poll_id, poll);
-
-			// Mark the signer as having registered in this poll.
-			PollsParticipatingIn::<T>::append(&sender, &poll_id);
+			Polls::<T>::insert(
+				&poll_id, 
+				poll
+			);
 
 			Self::deposit_event(Event::ParticipantRegistered { 
 				poll_id,
@@ -778,22 +739,22 @@ pub mod pallet
 				Error::<T>::PollVotingHasEnded
 			);
 
-			// Check that we've not reached the maximum number of interactions.
-			ensure!(
-				poll.state.num_interactions < T::MaxPollInteractions::get(),
-				Error::<T>::ParticipantInteractionLimitReached
-			);
+			// // Check that we've not reached the maximum number of interactions.
+			// ensure!(
+			// 	poll.state.num_interactions < T::MaxPollInteractions::get(),
+			// 	Error::<T>::ParticipantInteractionLimitReached
+			// );
 
-			// Hash and record the interaction data.
-			let mut leaf_data = data.map(|x| BlsScalar(x)).to_vec();
-			leaf_data.push(BlsScalar(public_key.x));
-			leaf_data.push(BlsScalar(public_key.y));
+			// // Hash and record the interaction data.
+			// let mut leaf_data = data.map(|x| BlsScalar(x)).to_vec();
+			// leaf_data.push(BlsScalar(public_key.x));
+			// leaf_data.push(BlsScalar(public_key.y));
 
 			// Insert the leaf into the state tree.
 			// poll.state.interaction_tree.subtree_hashes.push(sponge::hash(&leaf_data).to_bytes());
 
-			// Increment the number of interactions.
-			poll.state.num_interactions = poll.state.num_interactions + 1;
+			// // Increment the number of interactions.
+			// poll.state.num_interactions = poll.state.num_interactions + 1;
 			
 			Polls::<T>::insert(&poll_id, poll);
 

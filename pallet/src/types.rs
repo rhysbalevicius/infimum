@@ -41,7 +41,6 @@ pub struct PublicKey
     pub y: [u64; 4]
 }
 
-/// ...
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 #[scale_info(skip_type_params(T))]
 pub struct Poll<T: crate::Config>
@@ -55,59 +54,93 @@ pub struct Poll<T: crate::Config>
     /// The poll creation time (in ms).
     pub created_at: Timestamp,
 
-    /// Optional metadata associated to the poll.
-    pub metadata: Option<T::Hash>,
-
     /// The mutable poll state.
-    pub state: PollState,
+    pub state: PollState<T>,
 
     /// The poll config.
     pub config: PollConfiguration<T>
 }
 
-/// ...
-#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
-pub struct PollState
+pub trait PollProvider
 {
-    /// The number of registered participants. Known only after the poll has been processed.
-    pub num_participants: u32,
+    fn register_participant(self, data: BlsScalar) -> Self;
+    
+    fn registration_count(&self) -> u32;
 
-    /// The number of registered participants. Known only after the poll has been processed.
-    pub num_interactions: u32,
+    fn registration_limit_reached(&self) -> bool;
 
+    // fn in_signup_period(&self) -> bool;
+}
+
+impl<T: crate::Config> PollProvider for Poll<T>
+{
+    fn register_participant(
+        mut self, 
+        data: BlsScalar
+    ) -> Self
+    {
+        self.state.registrations = self.state.registrations.insert(data);
+    
+        self
+    }
+
+    fn registration_count(&self) -> u32
+    {
+        self.state.registrations.count
+    }
+
+    fn registration_limit_reached(&self) -> bool
+    {
+        self.state.registrations.count >= self.config.max_registrations
+    }
+
+
+    // /// Returns true iff `now` preceeds the start time of the poll.
+    // fn in_signup_period(&self) -> bool
+    // {
+    //     let now = T::TimeProvider::now().as_secs();
+	// 	return now < self.created_at + self.config.signup_period;
+    // }
+}
+
+#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+#[scale_info(skip_type_params(T))]
+pub struct PollState<T: crate::Config>
+{
     /// The merkle tree of registration data.
-    pub registration_tree: PollStateTree,
+    pub registrations: PollStateTree<T>,
 
     /// The merkle tree of interaction data.
-    pub interaction_tree: PollStateTree,
-
-    /// The number of valid commitments witnessed.
-    pub num_witnessed: u32,
+    pub interactions: PollStateTree<T>,
 
     /// The current proof commitment.
     pub commitment: Commitment,
 
     /// The final result of the poll.
-    pub outcome: Option<u128>,
+    pub outcome: Option<T::Hash>,
 }
 
-impl Default for PollState 
+// impl<T: crate::Config> PollProccessor for PollState<T>
+// {
+//     fn test(self)
+//     {
+
+//     }
+// }
+
+impl<T: crate::Config> Default for PollState<T>
 {
-    fn default() -> PollState 
+    fn default() -> PollState<T>
     {
         PollState {
-            num_participants: 0,
-            num_interactions: 0,
-            num_witnessed: 0,
-            registration_tree: PollStateTree::default(),
-            interaction_tree: PollStateTree::default(),
+            registrations: PollStateTree::default(),
+            interactions: PollStateTree::default(),
             commitment: (0, [0; 32]),
             outcome: None
         }
     }
 }
 
-/// ...
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 #[scale_info(skip_type_params(T))]
 pub struct PollConfiguration<T: crate::Config>
@@ -119,21 +152,18 @@ pub struct PollConfiguration<T: crate::Config>
     pub voting_period: Duration,
 
     /// The maximum number of participants permitted.
-    pub max_participants: u32,
+    pub max_registrations: u32,
 
     /// The possible outcomes of the poll.
     pub vote_options: VoteOptions<T>,
-
-    /// The size of 
-    pub batch_size: u8,
 
     /// The arity of the state trees.
     pub tree_arity: u8
 }
 
-/// ...
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
-pub struct PollStateTree
+#[scale_info(skip_type_params(T))]
+pub struct PollStateTree<T>
 {
     /// The arity of the tree.
     pub arity: u8,
@@ -149,32 +179,33 @@ pub struct PollStateTree
 
     /// The root of the tree of depth `T::MaxTreeDepth` which contains
     /// the leaves of `hashes` and zeros elsewhere.
-    pub root: Option<HashBytes>
+    pub root: Option<HashBytes>,
+
+    _marker: PhantomData<T>
 }
 
-impl Default for PollStateTree
+impl<T: crate::Config> Default for PollStateTree<T>
 {
-    fn default() -> PollStateTree
+    fn default() -> PollStateTree<T>
     {
         PollStateTree {
             arity: 2,
             depth: 0,
             count: 0,
             hashes: vec::Vec::<(u32, HashBytes)>::new(),
-            root: None
+            root: None,
+            _marker: PhantomData
         }
     }
 }
 
-trait PartialMerkleStack<T: crate::Config>
+pub trait PartialMerkleStack<T: crate::Config>
 {
     /// Inserts a new leaf into the tree.
     fn insert(self, data: BlsScalar) -> Self; // TODO `data` should be generic 
-
-    
 }
 
-impl<T: crate::Config> PartialMerkleStack<T> for PollStateTree
+impl<T: crate::Config> PartialMerkleStack<T> for PollStateTree<T>
 {
     /// Consume a new leaf and produce the resultant partial merkle tree.
     /// NB This function trades off extrinsic weight for storage space. 
@@ -229,5 +260,5 @@ impl<T: crate::Config> PartialMerkleStack<T> for PollStateTree
         self
     }
 
-    
+
 }
