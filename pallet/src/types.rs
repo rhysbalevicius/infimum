@@ -31,7 +31,7 @@ pub struct Coordinator<T: crate::Config>
 }
 
 /// A public key used to facillitate secret sharing between participants and coordinators.
-#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+#[derive(Clone, Copy, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 pub struct PublicKey 
 {
     /// A 256-bit x-coordinate of the public key.
@@ -63,11 +63,10 @@ pub struct Poll<T: crate::Config>
 
 pub trait PollProvider
 {
-    fn register_participant(self, data: BlsScalar) -> Self;
-    
-    fn registration_count(&self) -> u32;
-
+    fn register_participant(self, public_key: PublicKey, timestamp: u64) -> (u32, Self);
+    fn consume_interaction(self, public_key: PublicKey, data: PollInteractionData) -> (u32, Self);
     fn registration_limit_reached(&self) -> bool;
+    fn interaction_limit_reached(&self) -> bool;
 
     // fn in_signup_period(&self) -> bool;
 }
@@ -76,17 +75,31 @@ impl<T: crate::Config> PollProvider for Poll<T>
 {
     fn register_participant(
         mut self, 
-        data: BlsScalar
-    ) -> Self
+        public_key: PublicKey,
+        timestamp: u64
+    ) -> (u32, Self)
     {
+        let data = sponge::hash(&vec![
+            BlsScalar(public_key.x),
+            BlsScalar(public_key.y),
+            BlsScalar::from(timestamp)
+        ]);
         self.state.registrations = self.state.registrations.insert(data);
-    
-        self
+        (self.state.registrations.count, self)
     }
 
-    fn registration_count(&self) -> u32
+    fn consume_interaction(
+        mut self, 
+        public_key: PublicKey,
+        data: PollInteractionData
+    ) -> (u32, Self)
     {
-        self.state.registrations.count
+        let mut data = data.map(|x| BlsScalar(x)).to_vec();
+        data.push(BlsScalar(public_key.x));
+        data.push(BlsScalar(public_key.y));
+        
+        self.state.interactions = self.state.interactions.insert(sponge::hash(&data));
+        (self.state.interactions.count, self)
     }
 
     fn registration_limit_reached(&self) -> bool
@@ -94,7 +107,10 @@ impl<T: crate::Config> PollProvider for Poll<T>
         self.state.registrations.count >= self.config.max_registrations
     }
 
-
+    fn interaction_limit_reached(&self) -> bool
+    {
+        self.state.interactions.count >= T::MaxPollInteractions::get()
+    }
     // /// Returns true iff `now` preceeds the start time of the poll.
     // fn in_signup_period(&self) -> bool
     // {
@@ -119,14 +135,6 @@ pub struct PollState<T: crate::Config>
     /// The final result of the poll.
     pub outcome: Option<T::Hash>,
 }
-
-// impl<T: crate::Config> PollProccessor for PollState<T>
-// {
-//     fn test(self)
-//     {
-
-//     }
-// }
 
 impl<T: crate::Config> Default for PollState<T>
 {

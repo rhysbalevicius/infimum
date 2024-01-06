@@ -4,8 +4,6 @@ pub use pallet::*;
 use sp_std::vec;
 
 use frame_support::traits::UnixTime;
-use dusk_bls12_381::BlsScalar;
-use dusk_poseidon::sponge;
 
 pub mod types;
 pub use types::*;
@@ -124,6 +122,10 @@ pub mod pallet
 
 		/// Poll was interacted with.
 		PollInteraction {
+			/// The index of the poll interacted with.
+			poll_id: PollId,
+			/// The current interaction count.
+			count: u32,
 			/// Ephemeral public key used to encrypt the message.
 			public_key: PublicKey,
 			/// Interaction data.
@@ -663,7 +665,7 @@ pub mod pallet
 				Error::<T>::CoordinatorNotRegistered
 			);
 
-			// Ensure that the poll exists.
+			// Ensure that the poll exists and get it.
 			let Some(mut poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
 			// Check that the poll is still in the signup period.
@@ -681,22 +683,14 @@ pub mod pallet
 			// Record the hash of the registration data.
 			let timestamp = T::TimeProvider::now().as_secs();
 			
-			// Update the registration data container.
-			let poll = poll.register_participant(
-				sponge::hash(&vec![
-					BlsScalar(public_key.x),
-					BlsScalar(public_key.y),
-					BlsScalar::one(),
-					BlsScalar::from(timestamp)
-				])
-			);
-			let count = poll.registration_count();
-
+			// Insert the registration data into the poll state.
+			let (count, poll) = poll.register_participant(public_key, timestamp);
 			Polls::<T>::insert(
 				&poll_id, 
 				poll
 			);
 
+			// Emit the registration data for future processing by the coordinator.
 			Self::deposit_event(Event::ParticipantRegistered { 
 				poll_id,
 				count,
@@ -707,19 +701,17 @@ pub mod pallet
 			Ok(())
 		}
 
-		/// Inserts a message into the message tree for future processing by the coordinator. Valid messages include: a vote, 
-		/// and a key rotation. Rejected if sent outside of the timeline specified by the poll config. Participants may secretly
-		/// call this method to override their vote, thereby deincentivizing bribery.
-
-		/// TODO (M1) write description/header
+		/// Permits a registered participant to interact with an ongoing poll. Rejects if not within the voting period. Valid 
+		/// messages include: a vote, and a key rotation. Participants may secretly call this method (read: using a different
+		/// signer) in order to override their previous vote. 
 		///
 		/// - `poll_id`: The id of the poll.
 		/// - `public_key`: The current ephemeral public key of the registrant. May be different than the one used for registration.
-		/// - `data`: ...
+		/// - `data`: The packed and encrypted interaction data .
 		///
 		/// Emits `PollInteraction`.
 		#[pallet::call_index(7)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(1, 2))]
+		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
 		pub fn interact_with_poll(
 			origin: OriginFor<T>,
 			poll_id: PollId,
@@ -730,35 +722,32 @@ pub mod pallet
 			// Ensure that the extrinsic was signed.
 			ensure_signed(origin)?;
 
-			// Ensure that the poll exists.
+			// Ensure that the poll exists and get it.
 			let Some(mut poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-			// Check that we're in a voting period.
+			// Confirm that the poll is currently within it's voting period.
 			ensure!(
 				!poll_is_over(poll.clone()),
 				Error::<T>::PollVotingHasEnded
 			);
 
-			// // Check that we've not reached the maximum number of interactions.
-			// ensure!(
-			// 	poll.state.num_interactions < T::MaxPollInteractions::get(),
-			// 	Error::<T>::ParticipantInteractionLimitReached
-			// );
+			// Check that we've not reached the maximum number of interactions.
+			ensure!(
+				!poll.interaction_limit_reached(),
+				Error::<T>::ParticipantInteractionLimitReached
+			);
 
-			// // Hash and record the interaction data.
-			// let mut leaf_data = data.map(|x| BlsScalar(x)).to_vec();
-			// leaf_data.push(BlsScalar(public_key.x));
-			// leaf_data.push(BlsScalar(public_key.y));
+			// Insert the interaction data into the poll state.
+			let (count, poll) = poll.consume_interaction(public_key, data);
+			Polls::<T>::insert(
+				&poll_id, 
+				poll
+			);
 
-			// Insert the leaf into the state tree.
-			// poll.state.interaction_tree.subtree_hashes.push(sponge::hash(&leaf_data).to_bytes());
-
-			// // Increment the number of interactions.
-			// poll.state.num_interactions = poll.state.num_interactions + 1;
-			
-			Polls::<T>::insert(&poll_id, poll);
-
-			Self::deposit_event(Event::PollInteraction { 
+			// Emit the interaction data for future processing by the coordinator.
+			Self::deposit_event(Event::PollInteraction {
+				poll_id,
+				count,
 				public_key,
 				data
 			});
