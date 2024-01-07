@@ -4,6 +4,7 @@ pub use pallet::*;
 use sp_std::vec;
 
 use frame_support::traits::UnixTime;
+use sp_runtime::traits::SaturatedConversion;
 
 pub mod types;
 pub use types::*;
@@ -33,9 +34,6 @@ pub mod pallet
 	{
 		/// The overarching event type.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
-
-		/// Permit access to the current "timestamp" represented in milliseconds.
-		type TimeProvider: UnixTime;
 
 		/// The maximum number of polls a given coordinator may create.
 		#[pallet::constant]
@@ -102,8 +100,8 @@ pub mod pallet
 			poll_id: PollId,
 			/// The current registration count.
 			count: u32,
-			/// The timestamp of the registration.
-			timestamp: Timestamp,
+			/// The block number of the registration.
+			block: BlockNumber,
 			/// The registrations ephemeral public key.
 			public_key: PublicKey
 		},
@@ -115,9 +113,9 @@ pub mod pallet
 			/// The poll coordinator.
 			coordinator: T::AccountId,
 			/// The block number the poll signup period ends and voting commences.
-			starts_at: Timestamp,
+			starts_at: BlockNumber,
 			/// The block number the voting period commences.
-			ends_at: Timestamp
+			ends_at: BlockNumber
 		},
 
 		/// Poll was interacted with.
@@ -371,8 +369,8 @@ pub mod pallet
 
 		/// Create a new poll object where the caller is the designated coordinator.
 		///
-		/// - `signup_period`: The poll signup duration (in ms).
-		/// - `voting_period`: The poll voting duration (in ms).
+		/// - `signup_period`: The number of blocks for which the registration period is active.
+		/// - `voting_period`: The number of blocks for which the voting period is active.
 		/// - `max_registrations`: The maximum number of participants permitted.
 		/// - `vote_options`: The possible outcomes of the poll.
 		/// - `tree_arity`: The arity of the state trees.
@@ -384,8 +382,8 @@ pub mod pallet
 		#[pallet::weight(T::DbWeight::get().reads_writes(4, 3))]
 		pub fn create_poll(
 			origin: OriginFor<T>,
-			signup_period: Duration,
-			voting_period: Duration,
+			signup_period: BlockNumber,
+			voting_period: BlockNumber,
 			max_registrations: u32,
 			vote_options: vec::Vec<u128>,
 			tree_arity: u8
@@ -441,7 +439,7 @@ pub mod pallet
 
 			// Insert the poll into storage.
 			let index = Polls::<T>::count();
-			let created_at = T::TimeProvider::now().as_secs();
+			let created_at = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
 			Polls::<T>::insert(&index, Poll {
 				index,
 				created_at,
@@ -473,18 +471,18 @@ pub mod pallet
 			Ok(())
 		}
 
-		/// Compute the merkle roots of the current poll state tree. This operation must be
-		/// performed prior to commiting the poll outcome. Registration tree may be merged as
-		/// long as the registration period has elapsed, and the interaction tree may be 
-		/// merged as long as the voting period has elapsed.
-		///
-		/// Emits `PollStateMerged`.
-		#[pallet::call_index(4)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(3, 2))] 
-		pub fn merge_poll_state(
-			_origin: OriginFor<T>
-		) -> DispatchResult
-		{
+		// /// Compute the merkle roots of the current poll state tree. This operation must be
+		// /// performed prior to commiting the poll outcome. Registration tree may be merged as
+		// /// long as the registration period has elapsed, and the interaction tree may be 
+		// /// merged as long as the voting period has elapsed.
+		// ///
+		// /// Emits `PollStateMerged`.
+		// #[pallet::call_index(4)]
+		// #[pallet::weight(T::DbWeight::get().reads_writes(3, 2))] 
+		// pub fn merge_poll_state(
+		// 	_origin: OriginFor<T>
+		// ) -> DispatchResult
+		// {
 			// // Check that the extrinsic was signed and get the signer.
 			// let sender = ensure_signed(origin)?;
 			
@@ -571,8 +569,8 @@ pub mod pallet
 			// // Poll data has already been merged.
 			// else { Err(<Error::<T>>::PollDataEmpty)? }
 
-			Ok(())
-		}
+		// 	Ok(())
+		// }
 
 		// /// Verifies the proof that the current batch of messages have been correctly processed and, if successful, updates
 		// /// the current verification state. Rejected if called prior to the merge of poll state.
@@ -587,69 +585,69 @@ pub mod pallet
 		/// - `outcome`: The index of the option in VoteOptions. Include only with the last batch, or after the last batch has been verified.
 		/// 
 		/// Emits `PollOutcome` once the final batch has been verified.
-		#[pallet::call_index(5)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
-		pub fn commit_outcome(
-			_origin: OriginFor<T>,
-			_batches: vec::Vec<(ProofData, CommitmentData)>,
-			_outcome: Option<u32>
-		) -> DispatchResult
-		{
-			// // Check that the extrinsic was signed and get the signer.
-			// let sender = ensure_signed(origin)?;
+		// #[pallet::call_index(5)]
+		// #[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
+		// pub fn commit_outcome(
+		// 	_origin: OriginFor<T>,
+		// 	_batches: vec::Vec<(ProofData, CommitmentData)>,
+		// 	_outcome: Option<u32>
+		// ) -> DispatchResult
+		// {
+		// 	// // Check that the extrinsic was signed and get the signer.
+		// 	// let sender = ensure_signed(origin)?;
 
-			// // Get the coordinators most recent poll.
-			// let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
-			// let Some(index) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
-			// let Some(mut poll) = Polls::<T>::get(index) else { Err(<Error::<T>>::PollDoesNotExist)? };
+		// 	// // Get the coordinators most recent poll.
+		// 	// let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+		// 	// let Some(index) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
+		// 	// let Some(mut poll) = Polls::<T>::get(index) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-			// ensure!(
-			// 	poll.state.outcome.is_none(),
-			// 	Error::<T>::PollOutcomeAlreadyCommitted
-			// );
+		// 	// ensure!(
+		// 	// 	poll.state.outcome.is_none(),
+		// 	// 	Error::<T>::PollOutcomeAlreadyCommitted
+		// 	// );
 
-			// // Verify each batch of proofs, in order.
-			// for (proof, commitment) in batches.iter()
-			// {
-			// 	ensure!(
-			// 		verify_proof(
-			// 			poll.clone(),
-			// 			coordinator.verify_key.clone(),
-			// 			*proof,
-			// 			*commitment
-			// 		),
-			// 		Error::<T>::MalformedProof
-			// 	);
-			// 	// TODO (M1)
-			// 	// poll.state.num_witnessed += 1;
-			// 	// poll.state.commitment = *commitment;
-			// }
+		// 	// // Verify each batch of proofs, in order.
+		// 	// for (proof, commitment) in batches.iter()
+		// 	// {
+		// 	// 	ensure!(
+		// 	// 		verify_proof(
+		// 	// 			poll.clone(),
+		// 	// 			coordinator.verify_key.clone(),
+		// 	// 			*proof,
+		// 	// 			*commitment
+		// 	// 		),
+		// 	// 		Error::<T>::MalformedProof
+		// 	// 	);
+		// 	// 	// TODO (M1)
+		// 	// 	// poll.state.num_witnessed += 1;
+		// 	// 	// poll.state.commitment = *commitment;
+		// 	// }
 
-			// // Once the final batch is verified, we verify that the outcome matches the final commitment
-			// if let Some(outcome) = verify_outcome(poll.clone(), outcome)
-			// {
-			// 	poll.state.outcome = Some(outcome);
+		// 	// // Once the final batch is verified, we verify that the outcome matches the final commitment
+		// 	// if let Some(outcome) = verify_outcome(poll.clone(), outcome)
+		// 	// {
+		// 	// 	poll.state.outcome = Some(outcome);
 
-			// 	Self::deposit_event(Event::PollOutcome { 
-			// 		index,
-			// 		outcome
-			// 	});
-			// }
+		// 	// 	Self::deposit_event(Event::PollOutcome { 
+		// 	// 		index,
+		// 	// 		outcome
+		// 	// 	});
+		// 	// }
 
-			// // Update the poll state.
-			// Polls::<T>::insert(index, poll);
+		// 	// // Update the poll state.
+		// 	// Polls::<T>::insert(index, poll);
 
-			Ok(())
-		}
+		// 	Ok(())
+		// }
 
-		/// Permits a user to participate in an upcoming poll. Rejected if signup period has elapsed.
+		/// Permits a signer to participate in an upcoming poll. Rejected if signup period has elapsed.
 		///
 		///	- `poll_id`: The id of the poll.
 		/// - `public_key`: The ephemeral public key of the registrant.
 		///
 		/// Emits `ParticipantRegistered`.
 		#[pallet::call_index(6)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(3, 3))]
+		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
 		pub fn register_as_participant(
 			origin: OriginFor<T>,
 			poll_id: PollId,
@@ -658,12 +656,6 @@ pub mod pallet
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
-
-			// Coordinator accounts are not permitted to participate in polls.
-			ensure!(
-				!Coordinators::<T>::contains_key(&sender), 
-				Error::<T>::CoordinatorNotRegistered
-			);
 
 			// Ensure that the poll exists and get it.
 			let Some(mut poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
@@ -681,10 +673,10 @@ pub mod pallet
 			);
 
 			// Record the hash of the registration data.
-			let timestamp = T::TimeProvider::now().as_secs();
+			let block = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
 			
 			// Insert the registration data into the poll state.
-			let (count, poll) = poll.register_participant(public_key, timestamp);
+			let (count, poll) = poll.register_participant(public_key, block);
 			Polls::<T>::insert(
 				&poll_id, 
 				poll
@@ -695,19 +687,20 @@ pub mod pallet
 				poll_id,
 				count,
 				public_key,
-				timestamp
+				block
 			});
 
 			Ok(())
 		}
 
-		/// Permits a registered participant to interact with an ongoing poll. Rejects if not within the voting period. Valid 
-		/// messages include: a vote, and a key rotation. Participants may secretly call this method (read: using a different
-		/// signer) in order to override their previous vote. 
+		/// Permits a signer to interact with an ongoing poll. Rejects if not within the voting period. 
+		/// Valid messages include: a vote, and a key rotation. Participants may secretly call this 
+		/// method (read: using a different signer) in order to override their previous vote. 
 		///
-		/// - `poll_id`: The id of the poll.
-		/// - `public_key`: The current ephemeral public key of the registrant. May be different than the one used for registration.
-		/// - `data`: The packed and encrypted interaction data .
+		/// - `poll_id`: The index of the poll in storage.
+		/// - `public_key`: The current ephemeral public key of the registrant. May be different than 
+		///					the one used for registration.
+		/// - `data`: The encrypted interaction data.
 		///
 		/// Emits `PollInteraction`.
 		#[pallet::call_index(7)]
@@ -763,7 +756,7 @@ pub mod pallet
 	{
 		if let Some(p) = poll
 		{
-			let now = T::TimeProvider::now().as_secs();
+			let now = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
 			let voting_period_start = p.created_at + p.config.signup_period;
 			let voting_period_end = voting_period_start + p.config.voting_period;
 			return now >= voting_period_start && now < voting_period_end;
@@ -776,7 +769,7 @@ pub mod pallet
 		poll: Poll<T>
 	) -> bool
 	{
-		let now = T::TimeProvider::now().as_secs();
+		let now = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
 		return now < poll.created_at + poll.config.signup_period;
 	}
 
@@ -785,7 +778,7 @@ pub mod pallet
 		poll: Poll<T>
 	) -> bool
 	{
-		let now = T::TimeProvider::now().as_secs();
+		let now = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
 		let voting_period_start = poll.created_at + poll.config.signup_period;
 		let voting_period_end = voting_period_start + poll.config.voting_period;
 		return now < voting_period_end;

@@ -1,11 +1,11 @@
 use sp_std::vec;
+use frame_system::pallet_prelude::*;
 use frame_support::pallet_prelude::*;
 use dusk_bls12_381::BlsScalar;
 use dusk_poseidon::sponge;
 
 pub type PollId = u32;
-pub type Timestamp = u64;
-pub type Duration = Timestamp;
+pub type BlockNumber = u64;
 pub type HashBytes = [u8; 32];
 pub type PollInteractionData = [[u64; 4]; 16]; 
 pub type ProofData = [[u64; 4]; 16];
@@ -51,8 +51,8 @@ pub struct Poll<T: crate::Config>
     /// The poll creator.
     pub coordinator: T::AccountId,
 
-    /// The poll creation time (in ms).
-    pub created_at: Timestamp,
+    /// The number of the block in which the poll was created.
+    pub created_at: BlockNumber,
 
     /// The mutable poll state.
     pub state: PollState<T>,
@@ -61,7 +61,7 @@ pub struct Poll<T: crate::Config>
     pub config: PollConfiguration<T>
 }
 
-pub trait PollProvider
+pub trait PollProvider<T: crate::Config>
 {
     fn register_participant(self, public_key: PublicKey, timestamp: u64) -> (u32, Self);
     fn consume_interaction(self, public_key: PublicKey, data: PollInteractionData) -> (u32, Self);
@@ -71,7 +71,7 @@ pub trait PollProvider
     // fn in_signup_period(&self) -> bool;
 }
 
-impl<T: crate::Config> PollProvider for Poll<T>
+impl<T: crate::Config> PollProvider<T> for Poll<T>
 {
     fn register_participant(
         mut self, 
@@ -85,7 +85,8 @@ impl<T: crate::Config> PollProvider for Poll<T>
             BlsScalar::from(timestamp)
         ]);
         self.state.registrations = self.state.registrations.insert(data);
-        (self.state.registrations.count, self)
+        // (self.state.registrations.count, self)
+        (0, self)
     }
 
     fn consume_interaction(
@@ -153,11 +154,11 @@ impl<T: crate::Config> Default for PollState<T>
 #[scale_info(skip_type_params(T))]
 pub struct PollConfiguration<T: crate::Config>
 {
-    /// The poll signup duration (in ms).
-    pub signup_period: Duration,
+    /// The number of blocks for which the registration period is active.
+    pub signup_period: BlockNumber,
 
-    /// The poll voting duration (in ms).
-    pub voting_period: Duration,
+    /// The number of blocks for which the voting period is active.
+    pub voting_period: BlockNumber,
 
     /// The maximum number of participants permitted.
     pub max_registrations: u32,
