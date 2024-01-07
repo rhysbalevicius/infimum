@@ -44,7 +44,6 @@ pub struct PublicKey
     pub y: [u64; 4]
 }
 
-/// ...
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 #[scale_info(skip_type_params(T))]
 pub struct Poll<T: crate::Config>
@@ -65,54 +64,41 @@ pub struct Poll<T: crate::Config>
     pub config: PollConfiguration<T>
 }
 
-/// ...
 pub trait PollProvider<T: crate::Config>
 {
-    /// ...
     fn register_participant(
         self, 
         public_key: PublicKey, 
         timestamp: u64
     ) -> (u32, Self);
-    /// ...
+
     fn consume_interaction(
         self,
         public_key: PublicKey,
         data: PollInteractionData
     ) -> (u32, Self);
-    // /// ...
-    // fn prove(
-    //     self,
-    //     verify_key: VerifyKey<T>,
-    //     batches: ProofBatches
-    // ) -> Self;
-    // /// ...
-    // fn verify(
-    //     &self,
-    //     outcome: Option<u32>
-    // ) -> Result<u32, crate::Error<T>>;
-    // /// ...
-    // fn is_verifiable(&self) -> bool;
-    /// ...
+
+    fn merge_registrations(self) -> Self;
+
+    fn merge_interactions(self) -> Self;
+    
     fn is_merged(&self) -> bool;
-    /// ...
+
     fn registration_limit_reached(&self) -> bool;
-    /// ...
+
     fn interaction_limit_reached(&self) -> bool;
-    /// ...
+
     fn is_voting_period(&self) -> bool;
-    /// ...
+
     fn is_registration_period(&self) -> bool;
-    /// ...
+
     fn is_over(&self) -> bool;
-    /// ...
+
     fn is_fulfilled(&self) -> bool;
 }
 
-/// ...
 impl<T: crate::Config> PollProvider<T> for Poll<T>
 {
-    /// ...
     fn register_participant(
         mut self, 
         public_key: PublicKey,
@@ -129,7 +115,6 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         (self.state.registrations.count, self)
     }
 
-    /// ...
     fn consume_interaction(
         mut self, 
         public_key: PublicKey,
@@ -145,38 +130,29 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         (self.state.interactions.count, self)
     }
 
-    // /// ...
-    // fn prove(
-    //     mut self,
-    //     verify_key: VerifyKey<T>,
-    //     batches: ProofBatches
-    // ) -> Self
-    // {
-    //     self
-    // }
+    fn merge_registrations(
+        mut self
+    ) -> Self
+    {
+        let arity: usize = self.config.tree_arity.into();
+        self.state.registrations = self.state.registrations.merge(arity);
+        self
+    }
 
-    // /// ...
-    // fn verify(
-    //     &self,
-    //     outcome: Option<u32>
-    // ) -> Result<u32, crate::Error<T>>
-    // {
-    //     Ok(1)
-    // }
+    fn merge_interactions(
+        mut self
+    ) -> Self
+    {
+        let arity: usize = self.config.tree_arity.into();
+        self.state.interactions = self.state.interactions.merge(arity);
+        self
+    }
 
-    // /// ...
-    // fn is_verifiable(&self) -> bool
-    // {
-    //     false
-    // }
-
-    /// ...
     fn registration_limit_reached(&self) -> bool
     {
         self.state.registrations.count >= self.config.max_registrations
     }
 
-    /// ...
     fn interaction_limit_reached(&self) -> bool
     {
         self.state.interactions.count >= T::MaxPollInteractions::get()
@@ -219,7 +195,6 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
     }
 }
 
-/// ...
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 #[scale_info(skip_type_params(T))]
 pub struct PollState<T: crate::Config>
@@ -237,7 +212,6 @@ pub struct PollState<T: crate::Config>
     pub outcome: Option<Outcome>,
 }
 
-/// ...
 impl<T: crate::Config> Default for PollState<T>
 {
     fn default() -> PollState<T>
@@ -251,7 +225,6 @@ impl<T: crate::Config> Default for PollState<T>
     }
 }
 
-/// ...
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 #[scale_info(skip_type_params(T))]
 pub struct PollConfiguration<T: crate::Config>
@@ -272,7 +245,6 @@ pub struct PollConfiguration<T: crate::Config>
     pub tree_arity: u8
 }
 
-/// ...
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 #[scale_info(skip_type_params(T))]
 pub struct PollStateTree<T>
@@ -293,7 +265,6 @@ pub struct PollStateTree<T>
     _marker: PhantomData<T>
 }
 
-/// ...
 impl<T: crate::Config> Default for PollStateTree<T>
 {
     fn default() -> PollStateTree<T>
@@ -308,14 +279,15 @@ impl<T: crate::Config> Default for PollStateTree<T>
     }
 }
 
-/// ...
 pub trait PartialMerkleStack<T: crate::Config>
 {
     /// Inserts a new leaf into the tree.
     fn insert(self, arity: usize, data: BlsScalar) -> Self;
+
+    /// Merge the remainder of the tree.
+    fn merge(self, arity: usize) -> Self;
 }
 
-/// ...
 impl<T: crate::Config> PartialMerkleStack<T> for PollStateTree<T>
 {
     /// Consume a new leaf and produce the resultant partial merkle tree.
@@ -368,6 +340,16 @@ impl<T: crate::Config> PartialMerkleStack<T> for PollStateTree<T>
         self.hashes = hashes.iter().map(|(d, h)| (*d, h.to_bytes())).collect();
         self.count += 1;
 
+        self
+    }
+
+    // TODO
+    /// Obtain the root of the tree, wherein the remaining leaves take on zero values.
+    fn merge(
+        self,
+        _arity: usize
+    ) -> Self
+    {
         self
     }
 }
