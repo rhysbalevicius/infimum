@@ -8,6 +8,9 @@ pub mod types;
 pub use types::*;
 
 #[cfg(test)]
+mod mock;
+
+#[cfg(test)]
 mod tests;
 
 #[cfg(feature = "runtime-benchmarks")]
@@ -483,7 +486,7 @@ pub mod pallet
 		///
 		/// Emits `PollStateMerged`.
 		#[pallet::call_index(4)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(3, 2))] 
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))] 
 		pub fn merge_poll_state(
 			origin: OriginFor<T>
 		) -> DispatchResult
@@ -763,5 +766,19 @@ pub mod pallet
 		}
 
 		None
+	}
+
+	#[pallet::genesis_config]
+	#[derive(frame_support::DefaultNoBound)]
+	pub struct GenesisConfig<T: Config>
+	{
+		pub _marker: PhantomData<T>
+	}
+
+	// The build of genesis for the pallet.
+	#[pallet::genesis_build]
+	impl<T: Config> BuildGenesisConfig for GenesisConfig<T>
+	{
+		fn build(&self) {}
 	}
 }
