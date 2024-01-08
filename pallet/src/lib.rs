@@ -7,14 +7,16 @@ use sp_runtime::traits::SaturatedConversion;
 pub mod types;
 pub use types::*;
 
+mod constants;
+
 #[cfg(test)]
 mod mock;
 
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "runtime-benchmarks")]
-pub mod benchmarking;
+// #[cfg(feature = "runtime-benchmarks")]
+// pub mod benchmarking;
 
 #[frame_support::pallet]
 pub mod pallet 
@@ -43,18 +45,6 @@ pub mod pallet
 		/// The maximum length of a coordinators verification key.
 		#[pallet::constant]
 		type MaxVerifyKeyLength: Get<u32>;
-
-		/// The maximum arity for the state trees.
-		#[pallet::constant]
-		type MaxTreeArity: Get<u8>;
-
-		/// The minimum arity for the state trees.
-		#[pallet::constant]
-		type MinTreeArity: Get<u8>;
-
-		// /// The maximum state tree depth.
-		#[pallet::constant]
-		type MaxTreeDepth: Get<u8>;
 
 		/// The maximum number of poll outcomes.
 		#[pallet::constant]
@@ -156,6 +146,12 @@ pub mod pallet
 			poll_id: PollId,
 			/// The outcome of the poll.
 			outcome: u128
+		},
+
+		/// Empty and expired poll was nullified.
+		PollNullified {
+			/// The poll index.
+			poll_id: PollId
 		}
 	}
 
@@ -213,6 +209,7 @@ pub mod pallet
 
 	/// Map of ids to polls.
 	#[pallet::storage]
+	#[pallet::getter(fn polls)]
 	pub type Polls<T: Config> = CountedStorageMap<
 		_,
 		Twox64Concat,
@@ -222,6 +219,7 @@ pub mod pallet
 
 	/// Map of coordinators to their keys.
 	#[pallet::storage]
+	#[pallet::getter(fn coordinators)]
 	pub type Coordinators<T: Config> = CountedStorageMap<
 		_, 
 		Blake2_128Concat, 
@@ -260,6 +258,7 @@ pub mod pallet
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
+			ensure!(verify_key.len() > 0, Error::<T>::MalformedVerifyKey);
 			let verify_key: VerifyKey<T> = verify_key
 				.try_into()
 				.map_err(|_| Error::<T>::MalformedVerifyKey)?;
@@ -283,7 +282,7 @@ pub mod pallet
 				public_key,
 				verify_key
 			});
-			
+
 			Ok(())
 		}
 
@@ -348,6 +347,7 @@ pub mod pallet
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
+			ensure!(verify_key.len() > 0, Error::<T>::MalformedVerifyKey);
 			let verify_key: VerifyKey<T> = verify_key
 				.try_into()
 				.map_err(|_| Error::<T>::MalformedVerifyKey)?;
@@ -387,9 +387,6 @@ pub mod pallet
 		/// - `voting_period`: The number of blocks for which the voting period is active.
 		/// - `max_registrations`: The maximum number of participants permitted.
 		/// - `vote_options`: The possible outcomes of the poll.
-		/// - `tree_arity`: The arity of the state trees.
-		/// - `batch_size`: 
-		/// - `metadata`: Optional metadata associated to the poll.
 		///
 		/// Emits `PollCreated`.
 		#[pallet::call_index(3)]
@@ -399,23 +396,20 @@ pub mod pallet
 			signup_period: BlockNumber,
 			voting_period: BlockNumber,
 			max_registrations: u32,
-			vote_options: vec::Vec<u128>,
-			tree_arity: u8
+			vote_options: vec::Vec<u128>
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
 			// Validate config parameters.
+			let created_at = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
 			ensure!(
-				(
-					max_registrations <= T::MaxPollRegistrations::get() &&
-					tree_arity <= T::MaxTreeArity::get() &&
-					tree_arity >= T::MinTreeArity::get()
-				),
+				max_registrations <= T::MaxPollRegistrations::get(),
 				Error::<T>::PollConfigInvalid
 			);
 
+			ensure!(vote_options.len() > 1, Error::<T>::PollConfigInvalid);
 			let vote_options: VoteOptions<T> = vote_options
 				.try_into()
 				.map_err(|_| Error::<T>::PollConfigInvalid)?;
@@ -447,7 +441,6 @@ pub mod pallet
 
 			// Insert the poll into storage.
 			let index = Polls::<T>::count();
-			let created_at = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
 			Polls::<T>::insert(&index, Poll {
 				index,
 				created_at,
@@ -458,7 +451,7 @@ pub mod pallet
 					voting_period,
 					max_registrations,
 					vote_options,
-					tree_arity
+					tree_arity: 2
 				}
 			});
 
@@ -634,13 +627,44 @@ pub mod pallet
 			Ok(())
 		}
 
+		/// Permits the coordinator to nullify a poll which expired without recording a single interaction.
+		///
+		/// Calls to this extrinsic are rejected if the poll has not ended, or there was at least one interaction.
+		/// 
+		/// Emits `PollNullified`.
+		#[pallet::call_index(6)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
+		pub fn nullify_poll(
+			origin: OriginFor<T>
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			let sender = ensure_signed(origin)?;
+
+			// Get the coordinators most recent poll.
+			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+			let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
+			let Some(poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+
+			ensure!(
+				(!poll.is_registration_period() && poll.state.registrations.count == 0) || 
+				(poll.is_over() && poll.state.interactions.count == 0),
+				Error::<T>::PollCurrentlyActive
+			);
+
+			// Mark the poll as dead.
+			Polls::<T>::insert(poll_id, poll.nullify());
+
+			Ok(())
+		}
+
 		/// Permits a signer to participate in an upcoming poll. Rejected if signup period has elapsed.
 		///
 		///	- `poll_id`: The id of the poll.
 		/// - `public_key`: The ephemeral public key of the registrant.
 		///
 		/// Emits `ParticipantRegistered`.
-		#[pallet::call_index(6)]
+		#[pallet::call_index(7)]
 		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
 		pub fn register_as_participant(
 			origin: OriginFor<T>,
@@ -697,7 +721,7 @@ pub mod pallet
 		/// - `data`: The encrypted interaction data.
 		///
 		/// Emits `PollInteraction`.
-		#[pallet::call_index(7)]
+		#[pallet::call_index(8)]
 		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
 		pub fn interact_with_poll(
 			origin: OriginFor<T>,
@@ -713,10 +737,8 @@ pub mod pallet
 			let Some(poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
 			// Confirm that the poll is currently within it's voting period.
-			ensure!(
-				!poll.is_over(),
-				Error::<T>::PollVotingHasEnded
-			);
+			ensure!(!poll.is_registration_period(), Error::<T>::PollRegistrationInProgress);
+			ensure!(!poll.is_over(), Error::<T>::PollVotingHasEnded);
 
 			// Check that we've not reached the maximum number of interactions.
 			ensure!(
@@ -766,19 +788,5 @@ pub mod pallet
 		}
 
 		None
-	}
-
-	#[pallet::genesis_config]
-	#[derive(frame_support::DefaultNoBound)]
-	pub struct GenesisConfig<T: Config>
-	{
-		pub _marker: PhantomData<T>
-	}
-
-	// The build of genesis for the pallet.
-	#[pallet::genesis_build]
-	impl<T: Config> BuildGenesisConfig for GenesisConfig<T>
-	{
-		fn build(&self) {}
 	}
 }
