@@ -3,6 +3,7 @@ use frame_support::pallet_prelude::*;
 use sp_runtime::traits::SaturatedConversion;
 use dusk_bls12_381::BlsScalar;
 use dusk_poseidon::sponge;
+use crate::{constants::*};
 
 pub type BlockNumber = u64;
 pub type CommitmentData = HashBytes;
@@ -95,6 +96,10 @@ pub trait PollProvider<T: crate::Config>
     fn is_over(&self) -> bool;
 
     fn is_fulfilled(&self) -> bool;
+
+    fn is_nullified(&self) -> bool;
+
+    fn nullify(self) -> Self;
 }
 
 impl<T: crate::Config> PollProvider<T> for Poll<T>
@@ -107,8 +112,8 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
     {
         let arity: usize = self.config.tree_arity.into();
         let data = sponge::hash(&vec![
-            BlsScalar(public_key.x),
-            BlsScalar(public_key.y),
+            BlsScalar::from_raw(public_key.x),
+            BlsScalar::from_raw(public_key.y),
             BlsScalar::from(timestamp)
         ]);
         self.state.registrations = self.state.registrations.insert(arity, data);
@@ -122,9 +127,9 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
     ) -> (u32, Self)
     {
         let arity: usize = self.config.tree_arity.into();
-        let mut data = data.map(|x| BlsScalar(x)).to_vec();
-        data.push(BlsScalar(public_key.x));
-        data.push(BlsScalar(public_key.y));
+        let mut data = data.map(|x| BlsScalar::from_raw(x)).to_vec();
+        data.push(BlsScalar::from_raw(public_key.x));
+        data.push(BlsScalar::from_raw(public_key.y));
         
         self.state.interactions = self.state.interactions.insert(arity, sponge::hash(&data));
         (self.state.interactions.count, self)
@@ -183,15 +188,26 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
 		now > voting_period_end
     }
 
-    /// Returns true iff poll outcome has been committed to state.
+    /// Returns true iff poll outcome has been committed to state, or the poll is dead.
     fn is_fulfilled(&self) -> bool
     {
-        self.state.outcome.is_some()
+        self.state.outcome.is_some() || self.is_nullified()
     }
 
     fn is_merged(&self) -> bool
     {
         self.state.registrations.root.is_some() && self.state.interactions.root.is_some()
+    }
+
+    fn is_nullified(&self) -> bool
+    {
+        self.state.tombstone
+    }
+
+    fn nullify(mut self) -> Self
+    {
+        self.state.tombstone = true;
+        self
     }
 }
 
@@ -210,6 +226,9 @@ pub struct PollState<T: crate::Config>
 
     /// The final result of the poll.
     pub outcome: Option<Outcome>,
+
+    /// Whether the poll was nullified
+    pub tombstone: bool
 }
 
 impl<T: crate::Config> Default for PollState<T>
@@ -220,7 +239,8 @@ impl<T: crate::Config> Default for PollState<T>
             registrations: PollStateTree::default(),
             interactions: PollStateTree::default(),
             commitment: (0, [0; 32]),
-            outcome: None
+            outcome: None,
+            tombstone: false
         }
     }
 }
@@ -258,8 +278,8 @@ pub struct PollStateTree<T>
     /// The (depth, hash) pairs of the incrementally merged subtree.
     pub hashes: vec::Vec<(u32, HashBytes)>,
 
-    /// The root of the tree of depth `T::MaxTreeDepth` which contains
-    /// the leaves of `hashes` and zeros elsewhere.
+    /// The root of the tree of maximal depth which contains the
+    /// leaves of `hashes` and zeros elsewhere.
     pub root: Option<HashBytes>,
 
     _marker: PhantomData<T>
@@ -309,23 +329,28 @@ impl<T: crate::Config> PartialMerkleStack<T> for PollStateTree<T>
             .map(|(depth, hash_bytes)| (*depth, BlsScalar::from_bytes(hash_bytes).unwrap_or(BlsScalar::zero())))
             .collect();
         
-        hashes.push((1, data));
+        let mut depth: u32 = 0;
+        hashes.push((depth, data));
 
         // Hash `arity` hashes of equivalent depth until either the depth is exhausted,
         // or there are insufficiently many right-most hashes of equal depth. 
-        let mut depth: u32 = 1;
         loop
         {
             // Guard against the maximal hash depth that can be reached from any individual `insert` operation
             if depth > T::MaxIterationDepth::get() { break; }
 
+            // We need at least `arity` nodes in order to compute a subtree root.
             let size = hashes.len();
             if size < arity { break; }
 
-            // Find the index of the first item with a different depth
-            let Some(index) = hashes.iter().rposition(|(d,_)| *d != depth) else { break };
-            if index + arity != size - 1 { break };
+            // Find the index of the first item with a different depth, or if they all have the target depth
+            // then we can just take `arity` many of them.
+            if let Some(index) = hashes.iter().rposition(|(d,_)| *d != depth)
+            {
+                if size - index - 1 == arity { break };
+            }
 
+            // Remove `arity` hashes of equivalent depth and then compute the subtree root root.
             let subtree: vec::Vec<BlsScalar> = hashes
                 .split_off(size.saturating_sub(arity))
                 .iter()
@@ -343,13 +368,58 @@ impl<T: crate::Config> PartialMerkleStack<T> for PollStateTree<T>
         self
     }
 
-    // TODO
     /// Obtain the root of the tree, wherein the remaining leaves take on zero values.
+    /// NB we require the state tree to have a fixed height since the circuits must 
+    /// know this value at compile time.
     fn merge(
-        self,
-        _arity: usize
+        mut self,
+        arity: usize
     ) -> Self
     {
+        // These elements look like: (depth, hash)
+        let mut hashes: vec::Vec<(u32, BlsScalar)> = self.hashes
+            .iter()
+            .map(|(depth, hash_bytes)| (*depth, BlsScalar::from_bytes(hash_bytes).unwrap_or(BlsScalar::zero())))
+            .collect();
+
+        if hashes.len() == 0 { return self }
+
+        // Merge `hashes` into a singular root of full depth, using zero subtrees where necessary.
+        loop 
+        {
+            let Some((mut depth, _)) = hashes.last() else { break };
+
+            if depth == FULL_TREE_DEPTH - 1 { break }
+
+            let size = hashes.len();
+            let mut node_count = arity;
+            if let Some(index) = hashes.iter().rposition(|(d,_)| *d != depth)
+            {
+                node_count = size - index - 1;
+            };
+            
+            let rem = node_count % arity;
+            let mut subtree: vec::Vec<BlsScalar> = hashes
+                .split_off(size.saturating_sub(node_count))
+                .iter()
+                .map(|(_d,h)| *h)
+                .collect();
+
+            // Complete the subtree so that we have exactly `arity` nodes of depth `depth`
+            if rem > 0 { subtree.extend(vec![BlsScalar::from_raw(BINARY_TREE_ZEROES[depth as usize].clone()); rem]); }
+
+            // Hash the subtree and push onto the stack
+            depth += 1;
+            hashes.push((depth, sponge::hash(&subtree)));
+        }
+
+        // Store the root of the state tree and clear `hashes`.
+        if let Some((_, root)) = hashes.first() 
+        {
+            self.hashes = vec![];
+            self.root = Some(root.to_bytes());
+        }
+
         self
     }
 }
