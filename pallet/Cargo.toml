@@ -29,8 +29,8 @@ uint = { version = "0.8", default-features = false }
 sp-std = { version = "8.0.0", default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
 sp-io = { version = "23.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
 sp-runtime = { version = "24.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
-dusk-poseidon = { version = "0.31.0", default-features = false }
-dusk-bls12_381 = { version = "0.12.2", default-features = false }
+dusk-poseidon = { version = "0.33.0", default-features = false }
+dusk-bls12_381 = { version = "0.13", default-features = false }
 
 [dev-dependencies]
 sp-core = { version = "21.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
