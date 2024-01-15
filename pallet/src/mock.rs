@@ -2,10 +2,9 @@ use crate::*;
 use crate as pallet_infimum;
 use frame_support::{
     derive_impl,
-	traits::{ConstU8, ConstU32, ConstU64}
+	traits::{ConstU32, ConstU64}
 };
 use sp_core::H256;
-use frame_support::pallet_prelude::PhantomData;
 use sp_runtime::{
 	traits::{BlakeTwo256, IdentityLookup},
 	BuildStorage,
@@ -17,7 +16,7 @@ frame_support::construct_runtime!(
 	pub enum Test
 	{
 		System: frame_system::{Pallet, Call, Config<T>, Storage, Event<T>},
-		Infimum: pallet_infimum::{Pallet, Call, Storage, Config<T>, Event<T>},
+		Infimum: pallet_infimum::{Pallet, Call, Storage, Event<T>},
 	}
 );
 
@@ -48,24 +47,18 @@ impl frame_system::Config for Test {
 }
 
 impl Config for Test {
-    type MaxCoordinatorPolls = ConstU32<1028>;
-    type MaxVerifyKeyLength = ConstU32<4096>;
-    type MaxTreeArity = ConstU8<16>;
-    type MinTreeArity = ConstU8<2>;
-    type MaxTreeDepth = ConstU8<255>;
-    type MaxVoteOptions = ConstU32<32>;
-    type MaxPollRegistrations = ConstU32<65536>;
-    type MaxPollInteractions = ConstU32<65536>;
-    type MaxIterationDepth = ConstU32<256>;
+    type MaxCoordinatorPolls = ConstU32<2>;
+    type MaxVerifyKeyLength = ConstU32<4>;
+    type MaxVoteOptions = ConstU32<4>;
+    type MaxPollRegistrations = ConstU32<4>;
+    type MaxPollInteractions = ConstU32<4>;
+    type MaxIterationDepth = ConstU32<4>;
 	type RuntimeEvent = RuntimeEvent;
 }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
 	let t = RuntimeGenesisConfig {
 		system: Default::default(),
-		infimum: pallet_infimum::GenesisConfig {
-            _marker: PhantomData
-		},
 	}
 	.build_storage()
 	.unwrap();
