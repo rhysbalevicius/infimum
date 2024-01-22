@@ -1,4 +1,4 @@
-FROM ubuntu:20.04
+FROM pallet-base
 LABEL Rhys Balevicius "rhys@apollos.tech"
 
 ENV TZ=America/New_York
@@ -49,27 +49,11 @@ RUN echo "source $NVM_DIR/nvm.sh && \
     source $NVM_DIR/nvm.sh" | bash
 RUN echo "source /home/vagrant/nvm/nvm.sh\n" >> /home/vagrant/.bashrc
 
-# show backtraces
-ENV RUST_BACKTRACE 1
-
-# Install and setup rust toolchain
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y \
-    && echo 'source $HOME/.cargo/env' >> $HOME/.bashrc \
-    && $HOME/.cargo/bin/rustup default stable \
-    && $HOME/.cargo/bin/rustup update \ 
-    && $HOME/.cargo/bin/rustup update nightly \
-    && $HOME/.cargo/bin/rustup target add wasm32-unknown-unknown
-
 # Setup frontend template
 RUN git clone https://github.com/rhysbalevicius/substrate-front-end-template /home/vagrant/frontend-template \
     && cd /home/vagrant/frontend-template \
-    && npm install
-
-# Setup blockchain node template
-RUN git clone --branch infimum https://github.com/rhysbalevicius/substrate-node-template /home/vagrant/node-template \
-    && cp -r /home/vagrant/data/ substrate-node-template/pallets/infimum \
-    && cd /home/vagrant/node-template \
-    && $HOME/.cargo/bin/cargo build --release
+    && npm install \
+    && chown -R vagrant:vagrant /home/vagrant/frontend-template
 
 EXPOSE 22 8000 8080 9944
 

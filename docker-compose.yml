@@ -1,0 +1,44 @@
+version: "3.8"
+
+services:
+  pallet-base:
+    image: 'pallet-base'
+    build:
+      context: .
+      dockerfile: .dev/Dockerfile.base
+
+  test:
+    profiles:
+      - test
+    build:
+      context: .
+      dockerfile: .dev/Dockerfile.node
+    depends_on:
+      - pallet-base
+    command: cargo +nightly test --manifest-path=./pallets/infimum/Cargo.toml
+
+  runtime-node:
+    profiles: 
+      - dev
+    build:
+      context: .
+      dockerfile: .dev/Dockerfile.node
+    depends_on:
+      - pallet-base
+    ports:
+      - "0.0.0.0:8080:8080"
+      - "0.0.0.0:9933:9933"
+      - "0.0.0.0:9944:9944"
+    command: ./target/release/node-template --dev --unsafe-rpc-external
+
+  frontend:
+    profiles: 
+      - dev
+    build:
+      context: .
+      dockerfile: .dev/Dockerfile.frontend
+    command: npm start
+    ports: 
+      - "8000:8000"
+    depends_on:
+      - runtime-node 

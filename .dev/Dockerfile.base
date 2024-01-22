@@ -1,0 +1,29 @@
+FROM rust:latest
+LABEL Rhys Balevicius "rhys@apollos.tech"
+
+ENV TZ=America/New_York
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+ENV RUST_BACKTRACE 1
+
+RUN rustup update \
+    && rustup update nightly \
+    && rustup target add wasm32-unknown-unknown
+
+RUN apt-get update -y && apt-get install -y \
+    build-essential \
+    clang \
+    curl \
+    git \
+    libssl-dev \
+    protobuf-compiler 
+
+RUN git clone --branch infimum https://github.com/rhysbalevicius/substrate-node-template /node
+
+COPY ./.dev/Cargo.toml ./node/Cargo.toml
+COPY ./.dev/runtime/Cargo.toml ./node/runtime/Cargo.toml
+COPY ./.dev/runtime/src/lib.rs ./node/runtime/src/lib.rs
+COPY ./pallet ./node/pallets/infimum
+
+WORKDIR /node
+RUN cargo build --release
