@@ -131,6 +131,7 @@ pub mod pallet
 			commitment: Commitment
 		},
 
+		/// Poll state tree root was computed. 
 		PollStateMerged {
 			/// The poll index.
 			poll_id: PollId,
@@ -170,7 +171,7 @@ pub mod pallet
 		/// Maximum number of participants have registered.
 		ParticipantRegistrationLimitReached,
 
-		/// Maximum number of interactions have committed.
+		/// Maximum number of interactions has been reached.
 		ParticipantInteractionLimitReached,
 
 		/// Poll config is invalid.
