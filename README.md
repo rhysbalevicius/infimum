@@ -1,5 +1,7 @@
 # Infimum
 
+[![Build](https://github.com/rhysbalevicius/infimum/actions/workflows/ci.yml/badge.svg)](https://github.com/rhysbalevicius/infimum/actions/workflows/ci.yml)
+
 The Infimum pallet provides a private, receipt-free, and verifiable voting apparatus which disincentivizes collusion between participants. Note that the current scope of this project is intended to serve as a proof of concept and should *not* be used in production.
 
 ## Overview
