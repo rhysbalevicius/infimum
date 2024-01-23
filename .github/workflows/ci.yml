@@ -1,4 +1,4 @@
-name: Build and test
+name: Build
 
 on:
   push:
@@ -27,8 +27,8 @@ jobs:
 
       - name: Check Build
         run: |
-          SKIP_WASM_BUILD=1 cargo +nightly check --release
+          SKIP_WASM_BUILD=1 cargo +nightly check --release --manifest-path=./pallet/Cargo.toml
 
       - name: Run tests
         run: |
-          cargo +nightly test --all-features -- --test-threads=1 --nocapture
+          cargo +nightly test --all-features --manifest-path=./pallet/Cargo.toml
