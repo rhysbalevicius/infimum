@@ -1,6 +1,6 @@
-FROM node
+FROM node:21.6.0-slim
 
-RUN apt-get install curl
+RUN apt-get update -y && apt-get install git -y
 
 RUN git clone --branch infimum https://github.com/rhysbalevicius/substrate-front-end-template
 

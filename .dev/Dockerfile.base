@@ -1,4 +1,4 @@
-FROM rust:latest
+FROM rust:1.74.1-slim
 LABEL Rhys Balevicius "rhys@apollos.tech"
 
 ENV TZ=America/New_York
