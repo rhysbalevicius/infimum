@@ -5,6 +5,7 @@ ENV TZ=America/New_York
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 ENV RUST_BACKTRACE 1
+ENV CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG true
 
 RUN rustup update \
     && rustup update nightly \
@@ -18,7 +19,7 @@ RUN apt-get update -y && apt-get install -y \
     libssl-dev \
     protobuf-compiler 
 
-RUN git clone --branch infimum https://github.com/rhysbalevicius/substrate-node-template /node
+RUN git clone https://github.com/substrate-developer-hub/substrate-node-template.git /node
 
 COPY ./.dev/Cargo.toml ./node/Cargo.toml
 COPY ./.dev/runtime/Cargo.toml ./node/runtime/Cargo.toml
