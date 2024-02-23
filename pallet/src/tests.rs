@@ -28,8 +28,8 @@ fn coordinator_registration()
         let vk = vec![0; 4];
 
         assert_err!(Infimum::register_as_coordinator(RuntimeOrigin::none(), pk, vk.clone()), error::BadOrigin);
-        assert_err!(Infimum::register_as_coordinator(RuntimeOrigin::signed(1), pk, vec![]), Error::<Test>::MalformedVerifyKey);
-        assert_err!(Infimum::register_as_coordinator(RuntimeOrigin::signed(1), pk, vec![0;5]), Error::<Test>::MalformedVerifyKey);
+        assert_err!(Infimum::register_as_coordinator(RuntimeOrigin::signed(1), pk, vec![]), Error::<Test>::MalformedKeys);
+        assert_err!(Infimum::register_as_coordinator(RuntimeOrigin::signed(1), pk, vec![0;5]), Error::<Test>::MalformedKeys);
 
         // Successful registration
         assert_ok!(Infimum::register_as_coordinator(RuntimeOrigin::signed(0), pk, vk.clone()));
@@ -61,8 +61,8 @@ fn coordinator_registration_malformed()
         let vk = vec![0; 4];
 
         assert_err!(Infimum::register_as_coordinator(RuntimeOrigin::none(), pk, vk.clone()), error::BadOrigin);
-        assert_err!(Infimum::register_as_coordinator(RuntimeOrigin::signed(1), pk, vec![]), Error::<Test>::MalformedVerifyKey);
-        assert_err!(Infimum::register_as_coordinator(RuntimeOrigin::signed(1), pk, vec![0;5]), Error::<Test>::MalformedVerifyKey);
+        assert_err!(Infimum::register_as_coordinator(RuntimeOrigin::signed(1), pk, vec![]), Error::<Test>::MalformedKeys);
+        assert_err!(Infimum::register_as_coordinator(RuntimeOrigin::signed(1), pk, vec![0;5]), Error::<Test>::MalformedKeys);
     })
 }
 
@@ -77,12 +77,10 @@ fn coordinator_key_rotation()
         let vk_1 = vec![0; 4];
         let vk_2 = vec![1; 4];
 
-        assert_err!(Infimum::rotate_public_key(RuntimeOrigin::signed(0), pk_1), Error::<Test>::CoordinatorNotRegistered);
+        assert_err!(Infimum::rotate_keys(RuntimeOrigin::signed(0), pk_1, vk_1.clone()), Error::<Test>::CoordinatorNotRegistered);
         assert_ok!(Infimum::register_as_coordinator(RuntimeOrigin::signed(0), pk_1, vk_1));
-        assert_ok!(Infimum::rotate_public_key(RuntimeOrigin::signed(0), pk_2));
-        assert_ok!(Infimum::rotate_verify_key(RuntimeOrigin::signed(0), vk_2.clone()));
-        System::assert_has_event(Event::CoordinatorKeyChanged { who: 0, public_key: Some(pk_2), verify_key: None }.into());
-        System::assert_has_event(Event::CoordinatorKeyChanged { who: 0, public_key: None, verify_key: Some(VerifyKey::<Test>::truncate_from(vk_2.clone())) }.into());
+        assert_ok!(Infimum::rotate_keys(RuntimeOrigin::signed(0), pk_2, vk_2.clone()));
+        System::assert_has_event(Event::CoordinatorKeysChanged { who: 0, public_key: pk_2, verify_key: VerifyKey::<Test>::truncate_from(vk_2.clone()) }.into());
     })
 }
 
@@ -98,8 +96,7 @@ fn coordinator_key_rotation_during_poll()
         assert_ok!(Infimum::register_as_coordinator(RuntimeOrigin::signed(0), pk_1, vk_1));
         assert_ok!(Infimum::create_poll(RuntimeOrigin::signed(0), 1, 1, 1, vec![0,0]));
 
-        assert_err!(Infimum::rotate_public_key(RuntimeOrigin::signed(0), pk_2), Error::<Test>::PollCurrentlyActive);
-        assert_err!(Infimum::rotate_verify_key(RuntimeOrigin::signed(0), vk_2), Error::<Test>::PollCurrentlyActive);
+        assert_err!(Infimum::rotate_keys(RuntimeOrigin::signed(0), pk_2, vk_2), Error::<Test>::PollCurrentlyActive);
     })
 }
 
@@ -107,11 +104,10 @@ fn coordinator_key_rotation_during_poll()
 fn coordinator_key_rotation_malformed() 
 {
     new_test_ext().execute_with(|| {
-        assert_err!(Infimum::rotate_public_key(RuntimeOrigin::none(), PublicKey { x:[0;4], y: [0;4] }), error::BadOrigin);
-        assert_err!(Infimum::rotate_verify_key(RuntimeOrigin::none(), vec![]), error::BadOrigin);
+        assert_err!(Infimum::rotate_keys(RuntimeOrigin::none(), PublicKey { x:[0;4], y: [0;4] }, vec![]), error::BadOrigin);
         assert_ok!(Infimum::register_as_coordinator(RuntimeOrigin::signed(0), PublicKey { x:[0;4], y: [0;4] }, vec![0; 4]));
-        assert_err!(Infimum::rotate_verify_key(RuntimeOrigin::signed(0), vec![]), Error::<Test>::MalformedVerifyKey);
-        assert_err!(Infimum::rotate_verify_key(RuntimeOrigin::signed(0), vec![0;5]), Error::<Test>::MalformedVerifyKey);
+        assert_err!(Infimum::rotate_keys(RuntimeOrigin::signed(0), PublicKey { x:[0;4], y: [0;4] }, vec![]), Error::<Test>::MalformedKeys);
+        assert_err!(Infimum::rotate_keys(RuntimeOrigin::signed(0), PublicKey { x:[0;4], y: [0;4] }, vec![0;5]), Error::<Test>::MalformedKeys);
     })
 }
 

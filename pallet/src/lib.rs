@@ -78,13 +78,13 @@ pub mod pallet
 		},
 
 		/// A coordinator rotated one of their keys.
-		CoordinatorKeyChanged { 
+		CoordinatorKeysChanged { 
 			/// The coordinator.
 			who: T::AccountId, 
-			/// The new public key, if it was rotated.
-			public_key: Option<PublicKey>,
-			/// The new verify key, if it was rotated.
-			verify_key: Option<VerifyKey<T>>
+			/// The new public key.
+			public_key: PublicKey,
+			/// The new verify key.
+			verify_key: VerifyKey<T>
 		},
 
 		/// A participant registered to vote in a poll.
@@ -201,8 +201,8 @@ pub mod pallet
 		/// Poll outcome was previously committed and verified.
 		PollOutcomeAlreadyDetermined,
 
-		/// The verify key is malformed.
-		MalformedVerifyKey,
+		/// The key(s) provided are malformed.
+		MalformedKeys,
 
 		/// A proof was rejected.
 		MalformedProof
@@ -259,10 +259,10 @@ pub mod pallet
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			ensure!(verify_key.len() > 0, Error::<T>::MalformedVerifyKey);
+			ensure!(verify_key.len() > 0, Error::<T>::MalformedKeys);
 			let verify_key: VerifyKey<T> = verify_key
 				.try_into()
-				.map_err(|_| Error::<T>::MalformedVerifyKey)?;
+				.map_err(|_| Error::<T>::MalformedKeys)?;
 
 			// A coordinator may only be registered once.
 			ensure!(
@@ -287,71 +287,28 @@ pub mod pallet
 			Ok(())
 		}
 
-		/// Permits a coordinator to rotate their public key.
+		/// Permits a coordinator to rotate their public and verification keys.
 		/// Rejected if an extant poll is ongoing or awaiting processing.
 		///
 		/// - `public_key`: The new public key for the coordinator.
+		/// - `verify_key`: The new verification key for the coordinator.
 		///
 		/// Emits `CoordinatorKeyChanged`.
 		#[pallet::call_index(1)]
 		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
-		pub fn rotate_public_key(
+		pub fn rotate_keys(
 			origin: OriginFor<T>,
-			public_key: PublicKey
-		) -> DispatchResult
-		{
-			// Check that the extrinsic was signed and get the signer.
-			let sender = ensure_signed(origin)?;
-
-			// Check if origin is registered as a coordinator.
-			let Some(mut coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
-
-			// Ensure that the most recent poll is not currently in progress and is not missing an outcome, if it exists.
-			if let Some(index) = coordinator.last_poll
-			{
-				if let Some(poll) = Polls::<T>::get(index)
-				{
-					ensure!(
-						poll.is_over() && poll.is_fulfilled(),
-						Error::<T>::PollCurrentlyActive
-					);
-				}
-			}
-
-			// Update and store the coordinators updated public key.
-			coordinator.public_key = public_key.clone();
-			Coordinators::<T>::insert(&sender, coordinator);
-	
-			// Emit the key rotation event.
-			Self::deposit_event(Event::CoordinatorKeyChanged {
-				who: sender,
-				public_key: Some(public_key),
-				verify_key: None
-			});
-
-			Ok(())
-		}
-
-		/// Permits a coordinator to rotate their verification key.
-		/// Rejected if an extant poll is ongoing or awaiting processing.
-		///
-		/// - `verify_key`: The new verification key for the coordinator.
-		///
-		/// Emits `CoordinatorKeyChanged`.
-		#[pallet::call_index(2)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
-		pub fn rotate_verify_key(
-			origin: OriginFor<T>,
+			public_key: PublicKey,
 			verify_key: vec::Vec<u8>
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			ensure!(verify_key.len() > 0, Error::<T>::MalformedVerifyKey);
+			ensure!(verify_key.len() > 0, Error::<T>::MalformedKeys);
 			let verify_key: VerifyKey<T> = verify_key
 				.try_into()
-				.map_err(|_| Error::<T>::MalformedVerifyKey)?;
+				.map_err(|_| Error::<T>::MalformedKeys)?;
 
 			// Check if origin is registered as a coordinator.
 			let Some(mut coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
@@ -368,15 +325,17 @@ pub mod pallet
 				}
 			}
 
-			// Update and store the coordinators updated verification key.
+			coordinator.public_key = public_key.clone();
 			coordinator.verify_key = verify_key.clone();
-			Coordinators::<T>::insert(&sender, coordinator);
 
+			// Update and store the coordinators updated key(s).
+			Coordinators::<T>::insert(&sender, coordinator);
+	
 			// Emit the key rotation event.
-			Self::deposit_event(Event::CoordinatorKeyChanged {
+			Self::deposit_event(Event::CoordinatorKeysChanged {
 				who: sender,
-				public_key: None,
-				verify_key: Some(verify_key)
+				public_key,
+				verify_key
 			});
 
 			Ok(())
@@ -390,7 +349,7 @@ pub mod pallet
 		/// - `vote_options`: The possible outcomes of the poll.
 		///
 		/// Emits `PollCreated`.
-		#[pallet::call_index(3)]
+		#[pallet::call_index(2)]
 		#[pallet::weight(T::DbWeight::get().reads_writes(4, 3))]
 		pub fn create_poll(
 			origin: OriginFor<T>,
@@ -479,7 +438,7 @@ pub mod pallet
 		/// registration state tree, and once to merge the interaction state tree.
 		///
 		/// Emits `PollStateMerged`.
-		#[pallet::call_index(4)]
+		#[pallet::call_index(3)]
 		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))] 
 		pub fn merge_poll_state(
 			origin: OriginFor<T>
@@ -562,7 +521,7 @@ pub mod pallet
 		///				 should only be included only with the last batch, or in a separate call after the final batch has been verified.
 		/// 
 		/// Emits `PollOutcome` once the outcome been verified, and `PollCommitmentUpdated` to reflect the updated commitment.
-		#[pallet::call_index(5)]
+		#[pallet::call_index(4)]
 		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
 		pub fn commit_outcome(
 			origin: OriginFor<T>,
@@ -633,7 +592,7 @@ pub mod pallet
 		/// Calls to this extrinsic are rejected if the poll has not ended, or there was at least one interaction.
 		/// 
 		/// Emits `PollNullified`.
-		#[pallet::call_index(6)]
+		#[pallet::call_index(5)]
 		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
 		pub fn nullify_poll(
 			origin: OriginFor<T>
@@ -665,7 +624,7 @@ pub mod pallet
 		/// - `public_key`: The ephemeral public key of the registrant.
 		///
 		/// Emits `ParticipantRegistered`.
-		#[pallet::call_index(7)]
+		#[pallet::call_index(6)]
 		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
 		pub fn register_as_participant(
 			origin: OriginFor<T>,
@@ -722,7 +681,7 @@ pub mod pallet
 		/// - `data`: The encrypted interaction data.
 		///
 		/// Emits `PollInteraction`.
-		#[pallet::call_index(8)]
+		#[pallet::call_index(7)]
 		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
 		pub fn interact_with_poll(
 			origin: OriginFor<T>,
