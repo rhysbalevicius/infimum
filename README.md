@@ -34,6 +34,7 @@ As this project is still in it's infancy, all of the above have not yet been rea
 #### Public
 
 - `register_as_coordinator` - Registers the caller as a coordinator.
+- `rotate_keys` - Permits a registered coordinator to rotate their keys. Rejects if called during an active poll.
 - `create_poll` - Permits a registered coordinator to create a new poll.
 - `commit_outcome` - Permits a coordinator to commit, in batches, proofs that all of the valid participant registrations and poll interactions were included in the computation which decided the winning vote option. 
 - `nullify_poll` - Permits a coordinator to mark a poll with a tombstone in the event that it expired and did not record a single interaction.
@@ -48,7 +49,7 @@ As this project is still in it's infancy, all of the above have not yet been rea
 ### Events:
 
 - `CoordinatorRegistered` - A new coordinator was registered.
-- `CoordinatorKeyChanged` - A coordinator rotated one of their keys.
+- `CoordinatorKeysChanged` - A coordinator rotated one of their keys.
 - `ParticipantRegistered` - A participant registered to vote in a poll.
 - `PollCreated` - A new poll was created.
 - `PollInteraction` - Poll was interacted with.
