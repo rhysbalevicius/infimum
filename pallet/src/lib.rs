@@ -4,10 +4,10 @@ pub use pallet::*;
 use sp_std::vec;
 use sp_runtime::traits::SaturatedConversion;
 
-pub mod types;
-pub use types::*;
+pub mod hash;
+pub mod poll;
 
-mod constants;
+pub use poll::*;
 
 #[cfg(test)]
 mod mock;
@@ -42,10 +42,6 @@ pub mod pallet
 		#[pallet::constant]
 		type MaxCoordinatorPolls: Get<u32>;
 
-		/// The maximum length of a coordinators verification key.
-		#[pallet::constant]
-		type MaxVerifyKeyLength: Get<u32>;
-
 		/// The maximum number of poll outcomes.
 		#[pallet::constant]
 		type MaxVoteOptions: Get<u32>;
@@ -74,7 +70,7 @@ pub mod pallet
 			/// The public key of the coordinator.
 			public_key: PublicKey,
 			/// The verify key of the coordinator.
-			verify_key: VerifyKey<T>
+			verify_key: VerifyKey
 		},
 
 		/// A coordinator rotated one of their keys.
@@ -84,7 +80,7 @@ pub mod pallet
 			/// The new public key.
 			public_key: PublicKey,
 			/// The new verify key.
-			verify_key: VerifyKey<T>
+			verify_key: VerifyKey
 		},
 
 		/// A participant registered to vote in a poll.
@@ -225,7 +221,7 @@ pub mod pallet
 		_, 
 		Blake2_128Concat, 
 		T::AccountId,
-		Coordinator<T>
+		Coordinator
 	>;
 
 	/// Map of coordinators to the poll Ids they manage.
@@ -253,16 +249,17 @@ pub mod pallet
 		pub fn register_as_coordinator(
 			origin: OriginFor<T>,
 			public_key: PublicKey,
-			verify_key: vec::Vec<u8>
+			verify_key: VerifyKey
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			ensure!(verify_key.len() > 0, Error::<T>::MalformedKeys);
-			let verify_key: VerifyKey<T> = verify_key
-				.try_into()
-				.map_err(|_| Error::<T>::MalformedKeys)?;
+			// TODO: try to serialize with `Groth16::<Bn254>::process_vk`
+			// ensure!(verify_key.len() > 0, Error::<T>::MalformedKeys);
+			// let verify_key: VerifyKey<T> = verify_key
+			// 	.try_into()
+			// 	.map_err(|_| Error::<T>::MalformedKeys)?;
 
 			// A coordinator may only be registered once.
 			ensure!(
@@ -299,16 +296,17 @@ pub mod pallet
 		pub fn rotate_keys(
 			origin: OriginFor<T>,
 			public_key: PublicKey,
-			verify_key: vec::Vec<u8>
+			verify_key: VerifyKey
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			ensure!(verify_key.len() > 0, Error::<T>::MalformedKeys);
-			let verify_key: VerifyKey<T> = verify_key
-				.try_into()
-				.map_err(|_| Error::<T>::MalformedKeys)?;
+			// TODO: try to serialize with `Groth16::<Bn254>::process_vk`
+			// ensure!(verify_key.len() > 0, Error::<T>::MalformedKeys);
+			// let verify_key: VerifyKey<T> = verify_key
+			// 	.try_into()
+			// 	.map_err(|_| Error::<T>::MalformedKeys)?;
 
 			// Check if origin is registered as a coordinator.
 			let Some(mut coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
@@ -410,8 +408,7 @@ pub mod pallet
 					signup_period,
 					voting_period,
 					max_registrations,
-					vote_options,
-					tree_arity: 2
+					vote_options
 				}
 			});
 
@@ -432,321 +429,331 @@ pub mod pallet
 			Ok(())
 		}
 
-		/// Compute the roots of the current poll state trees. This operation must be performed prior to commiting the poll outcome. 
-		/// Registration tree may be merged as long as the registration period has elapsed, and the interaction tree may be merged 
-		/// as long as the voting period has elapsed. NB Coordinator's are required to call this extrinsic twice: once to merge the 
-		/// registration state tree, and once to merge the interaction state tree.
-		///
-		/// Emits `PollStateMerged`.
-		#[pallet::call_index(3)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))] 
-		pub fn merge_poll_state(
-			origin: OriginFor<T>
-		) -> DispatchResult
-		{
-			// Check that the extrinsic was signed and get the signer.
-			let sender = ensure_signed(origin)?;
+// ======================================================================================================
+
+		// /// Compute the roots of the current poll state trees. This operation must be performed prior to commiting the poll outcome. 
+		// /// Registration tree may be merged as long as the registration period has elapsed, and the interaction tree may be merged 
+		// /// as long as the voting period has elapsed. NB Coordinator's are required to call this extrinsic twice: once to merge the 
+		// /// registration state tree, and once to merge the interaction state tree.
+		// ///
+		// /// Emits `PollStateMerged`.
+		// #[pallet::call_index(3)]
+		// #[pallet::weight(T::DbWeight::get().reads_writes(2, 1))] 
+		// pub fn merge_poll_state(
+		// 	origin: OriginFor<T>
+		// ) -> DispatchResult
+		// {
+		// 	// Check that the extrinsic was signed and get the signer.
+		// 	let sender = ensure_signed(origin)?;
 			
-			// Get the coordinators most recent poll.
-			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
-			let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
-			let Some(poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+		// 	// Get the coordinators most recent poll.
+		// 	let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+		// 	let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
+		// 	let Some(poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-			// Check that the poll is not currently in the registration period.
-			ensure!(
-				!poll.is_registration_period(),
-				Error::<T>::PollRegistrationInProgress
-			);
+		// 	// Check that the poll is not currently in the registration period.
+		// 	ensure!(
+		// 		!poll.is_registration_period(),
+		// 		Error::<T>::PollRegistrationInProgress
+		// 	);
 
-			if poll.state.registrations.root.is_none()
-			{
-				// Ensure that there was at least one registration.
-				ensure!(
-					poll.state.registrations.hashes.len() > 0,
-					Error::<T>::PollDataEmpty
-				);
+		// 	if poll.state.registrations.root.is_none()
+		// 	{
+		// 		// Ensure that there was at least one registration.
+		// 		ensure!(
+		// 			poll.state.registrations.hashes.len() > 0,
+		// 			Error::<T>::PollDataEmpty
+		// 		);
 
-				// Compute the root of the registration tree and save it.
-				let poll = poll.merge_registrations();
-				Polls::<T>::insert(&poll_id, poll.clone());
+		// 		// Compute the root of the registration tree and save it.
+		// 		let poll = poll.merge_registrations();
+		// 		Polls::<T>::insert(&poll_id, poll.clone());
 
-				// Emit the hash event.
-				Self::deposit_event(Event::PollStateMerged {
-					poll_id,
-					registration_root: poll.state.registrations.root,
-					interaction_root: None
-				});
-			}
+		// 		// Emit the hash event.
+		// 		Self::deposit_event(Event::PollStateMerged {
+		// 			poll_id,
+		// 			registration_root: poll.state.registrations.root,
+		// 			interaction_root: None
+		// 		});
+		// 	}
 
-			else if poll.state.interactions.root.is_none()
-			{
-				// Check that the poll is not currenltly in the voting period.
-				ensure!(
-					poll.is_over(),
-					Error::<T>::PollVotingInProgress
-				);
+		// 	else if poll.state.interactions.root.is_none()
+		// 	{
+		// 		// Check that the poll is not currenltly in the voting period.
+		// 		ensure!(
+		// 			poll.is_over(),
+		// 			Error::<T>::PollVotingInProgress
+		// 		);
 
-				// Ensure that there was at least one interaction.
-				ensure!(
-					poll.state.interactions.hashes.len() > 0,
-					Error::<T>::PollDataEmpty
-				);
+		// 		// Ensure that there was at least one interaction.
+		// 		ensure!(
+		// 			poll.state.interactions.hashes.len() > 0,
+		// 			Error::<T>::PollDataEmpty
+		// 		);
 
-				// Compute the root of the interaction tree and save it.
-				let poll = poll.merge_interactions();
-				Polls::<T>::insert(&poll_id, poll.clone());
+		// 		// Compute the root of the interaction tree and save it.
+		// 		let poll = poll.merge_interactions();
+		// 		Polls::<T>::insert(&poll_id, poll.clone());
 
-				// Emit the hash event.
-				Self::deposit_event(Event::PollStateMerged {
-					poll_id,
-					registration_root: None,
-					interaction_root: poll.state.interactions.root
-				});
-			}
+		// 		// Emit the hash event.
+		// 		Self::deposit_event(Event::PollStateMerged {
+		// 			poll_id,
+		// 			registration_root: None,
+		// 			interaction_root: poll.state.interactions.root
+		// 		});
+		// 	}
 
-			// Poll data has already been merged.
-			else { Err(<Error::<T>>::PollDataEmpty)? }
+		// 	// Poll data has already been merged.
+		// 	else { Err(<Error::<T>>::PollDataEmpty)? }
 
-			Ok(())
-		}
+		// 	Ok(())
+		// }
 
-		/// Permits the coordinator to commit, in batches, proofs that all of the valid participant registrations and poll interactions 
-		/// were included in the computation which decided the winning vote option. Each individual proof carries a commitment value 
-		/// which is utilized to chain all of the proofs together, and in effect, to validate the final result.
-		///
-		/// Calls to this extrinsic are rejected if the poll has not ended, or if the root of the state trees have not yet been computed.
-		///
-		/// - `batches`: The ordered proofs alongside 
-		/// - `outcome`: The index of the option voted for (from the `VoteOptions` vec in the poll configuration). This parameter
-		///				 should only be included only with the last batch, or in a separate call after the final batch has been verified.
-		/// 
-		/// Emits `PollOutcome` once the outcome been verified, and `PollCommitmentUpdated` to reflect the updated commitment.
-		#[pallet::call_index(4)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
-		pub fn commit_outcome(
-			origin: OriginFor<T>,
-			batches: ProofBatches,
-			outcome: Option<OutcomeIndex>
-		) -> DispatchResult
-		{
-			// Check that the extrinsic was signed and get the signer.
-			let sender = ensure_signed(origin)?;
+// ======================================================================================================
 
-			// Get the coordinators most recent poll.
-			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
-			let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
-			let Some(mut poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+		// /// Permits the coordinator to commit, in batches, proofs that all of the valid participant registrations and poll interactions 
+		// /// were included in the computation which decided the winning vote option. Each individual proof carries a commitment value 
+		// /// which is utilized to chain all of the proofs together, and in effect, to validate the final result.
+		// ///
+		// /// Calls to this extrinsic are rejected if the poll has not ended, or if the root of the state trees have not yet been computed.
+		// ///
+		// /// - `batches`: The ordered proofs alongside 
+		// /// - `outcome`: The index of the option voted for (from the `VoteOptions` vec in the poll configuration). This parameter
+		// ///				 should only be included only with the last batch, or in a separate call after the final batch has been verified.
+		// /// 
+		// /// Emits `PollOutcome` once the outcome been verified, and `PollCommitmentUpdated` to reflect the updated commitment.
+		// #[pallet::call_index(4)]
+		// #[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
+		// pub fn commit_outcome(
+		// 	origin: OriginFor<T>,
+		// 	batches: ProofBatches,
+		// 	outcome: Option<OutcomeIndex>
+		// ) -> DispatchResult
+		// {
+		// 	// Check that the extrinsic was signed and get the signer.
+		// 	let sender = ensure_signed(origin)?;
 
-			// Check that the state trees have been merged and that the outcome has not already been committed.
-			ensure!(
-				poll.is_merged() && !poll.is_fulfilled(),
-				Error::<T>::PollOutcomeAlreadyDetermined
-			);
+		// 	// Get the coordinators most recent poll.
+		// 	let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+		// 	let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
+		// 	let Some(mut poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-			let (mut index, mut value) = poll.state.commitment;
+		// 	// Check that the state trees have been merged and that the outcome has not already been committed.
+		// 	ensure!(
+		// 		poll.is_merged() && !poll.is_fulfilled(),
+		// 		Error::<T>::PollOutcomeAlreadyDetermined
+		// 	);
 
-			// Verify each batch of proofs, in order.
-			for (proof, commitment) in batches.iter()
-			{
-				ensure!(
-					verify_proof(
-						poll.clone(),
-						coordinator.verify_key.clone(),
-						*proof,
-						*commitment
-					),
-					Error::<T>::MalformedProof
-				);
-				index += 1;
-				value = *commitment;
-				poll.state.commitment = (index, value);
-			}
+		// 	let (mut index, mut value) = poll.state.commitment;
 
-			// Once the final batch is verified, check that the outcome matches the final commitment.
-			if let Some(outcome) = verify_outcome(poll.clone(), outcome)
-			{
-				poll.state.outcome = Some(outcome);
+		// 	// Verify each batch of proofs, in order.
+		// 	for (proof, commitment) in batches.iter()
+		// 	{
+		// 		ensure!(
+		// 			verify_proof(
+		// 				poll.clone(),
+		// 				coordinator.verify_key.clone(),
+		// 				*proof,
+		// 				*commitment
+		// 			),
+		// 			Error::<T>::MalformedProof
+		// 		);
+		// 		index += 1;
+		// 		value = *commitment;
+		// 		poll.state.commitment = (index, value);
+		// 	}
 
-				Self::deposit_event(Event::PollOutcome { 
-					poll_id,
-					outcome
-				});
-			}
-			else if batches.len() > 0
-			{
-				Self::deposit_event(Event::PollCommitmentUpdated {
-					poll_id,
-					commitment: (index, value)
-				})
-			}
-			else { Err(<Error::<T>>::MalformedProof)? }
+		// 	// Once the final batch is verified, check that the outcome matches the final commitment.
+		// 	if let Some(outcome) = verify_outcome(poll.clone(), outcome)
+		// 	{
+		// 		poll.state.outcome = Some(outcome);
 
-			// Update the poll state.
-			Polls::<T>::insert(poll_id, poll);
+		// 		Self::deposit_event(Event::PollOutcome { 
+		// 			poll_id,
+		// 			outcome
+		// 		});
+		// 	}
+		// 	else if batches.len() > 0
+		// 	{
+		// 		Self::deposit_event(Event::PollCommitmentUpdated {
+		// 			poll_id,
+		// 			commitment: (index, value)
+		// 		})
+		// 	}
+		// 	else { Err(<Error::<T>>::MalformedProof)? }
 
-			Ok(())
-		}
+		// 	// Update the poll state.
+		// 	Polls::<T>::insert(poll_id, poll);
 
-		/// Permits the coordinator to nullify a poll which expired without recording a single interaction.
-		///
-		/// Calls to this extrinsic are rejected if the poll has not ended, or there was at least one interaction.
-		/// 
-		/// Emits `PollNullified`.
-		#[pallet::call_index(5)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
-		pub fn nullify_poll(
-			origin: OriginFor<T>
-		) -> DispatchResult
-		{
-			// Check that the extrinsic was signed and get the signer.
-			let sender = ensure_signed(origin)?;
+		// 	Ok(())
+		// }
 
-			// Get the coordinators most recent poll.
-			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
-			let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
-			let Some(poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+// ======================================================================================================
 
-			ensure!(
-				(!poll.is_registration_period() && poll.state.registrations.count == 0) || 
-				(poll.is_over() && poll.state.interactions.count == 0),
-				Error::<T>::PollCurrentlyActive
-			);
+		// /// Permits the coordinator to nullify a poll which expired without recording a single interaction.
+		// ///
+		// /// Calls to this extrinsic are rejected if the poll has not ended, or there was at least one interaction.
+		// /// 
+		// /// Emits `PollNullified`.
+		// #[pallet::call_index(5)]
+		// #[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
+		// pub fn nullify_poll(
+		// 	origin: OriginFor<T>
+		// ) -> DispatchResult
+		// {
+		// 	// Check that the extrinsic was signed and get the signer.
+		// 	let sender = ensure_signed(origin)?;
 
-			// Mark the poll as dead.
-			Polls::<T>::insert(poll_id, poll.nullify());
+		// 	// Get the coordinators most recent poll.
+		// 	let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+		// 	let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
+		// 	let Some(poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-			Ok(())
-		}
+		// 	ensure!(
+		// 		(!poll.is_registration_period() && poll.state.registrations.count == 0) || 
+		// 		(poll.is_over() && poll.state.interactions.count == 0),
+		// 		Error::<T>::PollCurrentlyActive
+		// 	);
 
-		/// Permits a signer to participate in an upcoming poll. Rejected if signup period has elapsed.
-		///
-		///	- `poll_id`: The id of the poll.
-		/// - `public_key`: The ephemeral public key of the registrant.
-		///
-		/// Emits `ParticipantRegistered`.
-		#[pallet::call_index(6)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
-		pub fn register_as_participant(
-			origin: OriginFor<T>,
-			poll_id: PollId,
-			public_key: PublicKey
-		) -> DispatchResult
-		{
-			// Check that the extrinsic was signed and get the signer.
-			ensure_signed(origin)?;
+		// 	// Mark the poll as dead.
+		// 	Polls::<T>::insert(poll_id, poll.nullify());
 
-			// Ensure that the poll exists and get it.
-			let Some(poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+		// 	Ok(())
+		// }
 
-			// Check that the poll is still in the signup period.
-			ensure!(
-				poll.is_registration_period(),
-				Error::<T>::PollRegistrationHasEnded
-			);
+// ======================================================================================================
 
-			// Check that the maximum number of sign-ups has not been reached.
-			ensure!(
-				!poll.registration_limit_reached(),
-				Error::<T>::ParticipantRegistrationLimitReached
-			);
+		// /// Permits a signer to participate in an upcoming poll. Rejected if signup period has elapsed.
+		// ///
+		// ///	- `poll_id`: The id of the poll.
+		// /// - `public_key`: The ephemeral public key of the registrant.
+		// ///
+		// /// Emits `ParticipantRegistered`.
+		// #[pallet::call_index(6)]
+		// #[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
+		// pub fn register_as_participant(
+		// 	origin: OriginFor<T>,
+		// 	poll_id: PollId,
+		// 	public_key: PublicKey
+		// ) -> DispatchResult
+		// {
+		// 	// Check that the extrinsic was signed and get the signer.
+		// 	ensure_signed(origin)?;
 
-			// Record the hash of the registration data.
-			let block = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
+		// 	// Ensure that the poll exists and get it.
+		// 	let Some(poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+
+		// 	// Check that the poll is still in the signup period.
+		// 	ensure!(
+		// 		poll.is_registration_period(),
+		// 		Error::<T>::PollRegistrationHasEnded
+		// 	);
+
+		// 	// Check that the maximum number of sign-ups has not been reached.
+		// 	ensure!(
+		// 		!poll.registration_limit_reached(),
+		// 		Error::<T>::ParticipantRegistrationLimitReached
+		// 	);
+
+		// 	// Record the hash of the registration data.
+		// 	let block = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
 			
-			// Insert the registration data into the poll state.
-			let (count, poll) = poll.register_participant(public_key, block);
-			Polls::<T>::insert(
-				&poll_id, 
-				poll
-			);
+		// 	// Insert the registration data into the poll state.
+		// 	let (count, poll) = poll.register_participant(public_key, block);
+		// 	Polls::<T>::insert(
+		// 		&poll_id, 
+		// 		poll
+		// 	);
 
-			// Emit the registration data for future processing by the coordinator.
-			Self::deposit_event(Event::ParticipantRegistered { 
-				poll_id,
-				count,
-				public_key,
-				block
-			});
+		// 	// Emit the registration data for future processing by the coordinator.
+		// 	Self::deposit_event(Event::ParticipantRegistered { 
+		// 		poll_id,
+		// 		count,
+		// 		public_key,
+		// 		block
+		// 	});
 
-			Ok(())
-		}
+		// 	Ok(())
+		// }
 
-		/// Permits a signer to interact with an ongoing poll. Rejects if not within the voting period. 
-		/// Valid messages include: a vote, and a key rotation. Participants may secretly call this 
-		/// method (read: using a different signer) in order to override their previous vote. 
-		///
-		/// - `poll_id`: The index of the poll in storage.
-		/// - `public_key`: The current ephemeral public key of the registrant. May be different than 
-		///					the one used for registration.
-		/// - `data`: The encrypted interaction data.
-		///
-		/// Emits `PollInteraction`.
-		#[pallet::call_index(7)]
-		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
-		pub fn interact_with_poll(
-			origin: OriginFor<T>,
-			poll_id: PollId,
-			public_key: PublicKey,
-			data: PollInteractionData
-		) -> DispatchResult
-		{
-			// Ensure that the extrinsic was signed.
-			ensure_signed(origin)?;
+// ======================================================================================================
 
-			// Ensure that the poll exists and get it.
-			let Some(poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+		// /// Permits a signer to interact with an ongoing poll. Rejects if not within the voting period. 
+		// /// Valid messages include: a vote, and a key rotation. Participants may secretly call this 
+		// /// method (read: using a different signer) in order to override their previous vote. 
+		// ///
+		// /// - `poll_id`: The index of the poll in storage.
+		// /// - `public_key`: The current ephemeral public key of the registrant. May be different than 
+		// ///					the one used for registration.
+		// /// - `data`: The encrypted interaction data.
+		// ///
+		// /// Emits `PollInteraction`.
+		// #[pallet::call_index(7)]
+		// #[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
+		// pub fn interact_with_poll(
+		// 	origin: OriginFor<T>,
+		// 	poll_id: PollId,
+		// 	public_key: PublicKey,
+		// 	data: PollInteractionData
+		// ) -> DispatchResult
+		// {
+		// 	// Ensure that the extrinsic was signed.
+		// 	ensure_signed(origin)?;
 
-			// Confirm that the poll is currently within it's voting period.
-			ensure!(!poll.is_registration_period(), Error::<T>::PollRegistrationInProgress);
-			ensure!(!poll.is_over(), Error::<T>::PollVotingHasEnded);
+		// 	// Ensure that the poll exists and get it.
+		// 	let Some(poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-			// Check that we've not reached the maximum number of interactions.
-			ensure!(
-				!poll.interaction_limit_reached(),
-				Error::<T>::ParticipantInteractionLimitReached
-			);
+		// 	// Confirm that the poll is currently within it's voting period.
+		// 	ensure!(!poll.is_registration_period(), Error::<T>::PollRegistrationInProgress);
+		// 	ensure!(!poll.is_over(), Error::<T>::PollVotingHasEnded);
 
-			// Insert the interaction data into the poll state.
-			let (count, poll) = poll.consume_interaction(public_key, data);
-			Polls::<T>::insert(
-				&poll_id, 
-				poll
-			);
+		// 	// Check that we've not reached the maximum number of interactions.
+		// 	ensure!(
+		// 		!poll.interaction_limit_reached(),
+		// 		Error::<T>::ParticipantInteractionLimitReached
+		// 	);
 
-			// Emit the interaction data for future processing by the coordinator.
-			Self::deposit_event(Event::PollInteraction {
-				poll_id,
-				count,
-				public_key,
-				data
-			});
+		// 	// Insert the interaction data into the poll state.
+		// 	let (count, poll) = poll.consume_interaction(public_key, data);
+		// 	Polls::<T>::insert(
+		// 		&poll_id, 
+		// 		poll
+		// 	);
 
-			Ok(())
-		}
+		// 	// Emit the interaction data for future processing by the coordinator.
+		// 	Self::deposit_event(Event::PollInteraction {
+		// 		poll_id,
+		// 		count,
+		// 		public_key,
+		// 		data
+		// 	});
+
+		// 	Ok(())
+		// }
 	}
 
-	// ==========================================
-	// TODO (M2) 
-	fn verify_proof<T: Config>(
-		_poll_data: Poll<T>,
-		_verify_key: VerifyKey<T>,
-		_proof_data: ProofData,
-		_commitment: CommitmentData
-	) -> bool
-	{
-		true
-	}
-	fn verify_outcome<T: Config>(
-		poll_data: Poll<T>,
-		index: Option<OutcomeIndex>
-	) -> Option<Outcome>
-	{
-		let Some(index) = index else { return None };
-		if (index as usize) < poll_data.config.vote_options.len()
-		{
-			return Some(poll_data.config.vote_options[index as usize]);
-		}
+	// // ==========================================
+	// // TODO (M2) 
+	// fn verify_proof<T: Config>(
+	// 	_poll_data: Poll<T>,
+	// 	_verify_key: VerifyKey<T>,
+	// 	_proof_data: ProofData,
+	// 	_commitment: CommitmentData
+	// ) -> bool
+	// {
+	// 	true
+	// }
+	// fn verify_outcome<T: Config>(
+	// 	poll_data: Poll<T>,
+	// 	index: Option<OutcomeIndex>
+	// ) -> Option<Outcome>
+	// {
+	// 	let Some(index) = index else { return None };
+	// 	if (index as usize) < poll_data.config.vote_options.len()
+	// 	{
+	// 		return Some(poll_data.config.vote_options[index as usize]);
+	// 	}
 
-		None
-	}
+	// 	None
+	// }
 }
