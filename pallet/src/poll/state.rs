@@ -60,12 +60,13 @@ pub struct PollStateTree
 pub enum MerkleTreeError
 {
     /// The tree is full and cannot be inserted.
-    TreeFull,
+    TreeAlreadyFull,
     /// The tree has already been merged.
-    TreeMerged,
+    TreeAlreadyMerged,
     /// The hash function did not succeed.
     HashFailed,
-    // InvalidWidthCircom { width: usize, max_limit: usize },
+    /// The merge operation failed.
+    MergeFailed
 }
 
 pub trait AmortizedIncrementalMerkleTree: Sized
@@ -113,7 +114,7 @@ impl AmortizedIncrementalMerkleTree for PollStateTree
     ) -> Result<Self, MerkleTreeError>
     {
         // Ensure that the tree is not full (or merged).
-        if self.root != None { Err(MerkleTreeError::TreeFull)? }
+        if self.root != None { Err(MerkleTreeError::TreeAlreadyFull)? }
 
         self.count += 1;
         self.hashes.push((0, leaf));
@@ -166,7 +167,7 @@ impl AmortizedIncrementalMerkleTree for PollStateTree
     ) -> Result<Self, MerkleTreeError>
     {
         // Ensure the tree is not already merged.
-        if self.root != None { Err(MerkleTreeError::TreeMerged)? }
+        if self.root != None { Err(MerkleTreeError::TreeAlreadyMerged)? }
 
         let zeroes = get_merkle_zeroes(self.arity);
         if self.hashes.len() == 0
