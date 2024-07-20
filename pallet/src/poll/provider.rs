@@ -80,6 +80,51 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         Ok((self.state.registrations.count, self))
     }
 
+    fn consume_interaction(
+        mut self, 
+        public_key: PublicKey,
+        data: PollInteractionData
+    ) -> Result<(u32, Self), MerkleTreeError>
+    {
+        let Some(mut hash4) = Poseidon::<Fr>::new_circom(4).ok() else { Err(MerkleTreeError::HashFailed)? };
+        let Some(mut hash5) = Poseidon::<Fr>::new_circom(5).ok() else { Err(MerkleTreeError::HashFailed)? };
+
+        let left_inputs: Vec<Fr> = Vec::from([ data[0], data[1], data[2], data[3], data[4] ])
+            .iter()
+            .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
+            .collect();
+
+        let right_inputs: Vec<Fr> = Vec::from([ data[5], data[6], data[7], data[8], data[9] ])
+            .iter()
+            .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
+            .collect();
+
+        let Some(left) = hash5.hash(&left_inputs).ok() else { Err(MerkleTreeError::HashFailed)? };
+        let Some(right) = hash5.hash(&right_inputs).ok() else { Err(MerkleTreeError::HashFailed)? };
+
+        let left_bytes = left.into_bigint().to_bytes_be();
+        let right_bytes = right.into_bigint().to_bytes_be();
+
+        let inputs: Vec<Fr> = Vec::from([
+            left_bytes,
+            right_bytes,
+            Vec::from(public_key.x),
+            Vec::from(public_key.y)
+        ])
+            .iter()
+            .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
+            .collect();
+
+        let Some(result) = hash4.hash(&inputs).ok() else { Err(MerkleTreeError::HashFailed)? };
+        let bytes = result.into_bigint().to_bytes_be();
+        let mut leaf = [0u8; 32];
+        leaf[..bytes.len()].copy_from_slice(&bytes);
+
+        self.state.interactions = self.state.interactions.insert(leaf)?;
+
+        Ok((self.state.interactions.count, self))
+    }
+
     fn merge_registrations(
         mut self
     ) -> Result<Self, MerkleTreeError>
