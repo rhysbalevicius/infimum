@@ -51,6 +51,34 @@ pub trait PollProvider<T: crate::Config>: Sized
 
 impl<T: crate::Config> PollProvider<T> for Poll<T>
 {
+    fn register_participant(
+        mut self, 
+        public_key: PublicKey,
+        timestamp: u64
+    ) -> Result<(u32, Self), MerkleTreeError>
+    {
+        let Some(mut hasher) = Poseidon::<Fr>::new_circom(4).ok() else { Err(MerkleTreeError::HashFailed)? };
+
+        let mut timestamp_bytes = [0u8; 32];
+        timestamp_bytes[24..].copy_from_slice(&timestamp.to_be_bytes());
+
+        let mut credit_bytes = [0u8; 32];
+        credit_bytes[31] = 1;
+
+        let inputs: Vec<Fr> = Vec::from([ public_key.x, public_key.y, credit_bytes, timestamp_bytes ])
+            .iter()
+            .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
+            .collect();
+
+        let Some(result) = hasher.hash(&inputs).ok() else { Err(MerkleTreeError::HashFailed)? };
+        let bytes = result.into_bigint().to_bytes_be();
+        let mut leaf = [0u8; 32];
+        leaf[..bytes.len()].copy_from_slice(&bytes);
+
+        self.state.registrations = self.state.registrations.insert(leaf)?;
+
+        Ok((self.state.registrations.count, self))
+    }
 
     fn merge_registrations(
         mut self
