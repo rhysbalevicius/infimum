@@ -201,7 +201,10 @@ pub mod pallet
 		MalformedKeys,
 
 		/// A proof was rejected.
-		MalformedProof
+		MalformedProof,
+
+		/// Poll state tree merge operation failed.
+		MergeOperationFailed { reason: u8 },
 	}
 
 	/// Map of ids to polls.
@@ -429,87 +432,89 @@ pub mod pallet
 			Ok(())
 		}
 
-// ======================================================================================================
-
-		// /// Compute the roots of the current poll state trees. This operation must be performed prior to commiting the poll outcome. 
-		// /// Registration tree may be merged as long as the registration period has elapsed, and the interaction tree may be merged 
-		// /// as long as the voting period has elapsed. NB Coordinator's are required to call this extrinsic twice: once to merge the 
-		// /// registration state tree, and once to merge the interaction state tree.
-		// ///
-		// /// Emits `PollStateMerged`.
-		// #[pallet::call_index(3)]
-		// #[pallet::weight(T::DbWeight::get().reads_writes(2, 1))] 
-		// pub fn merge_poll_state(
-		// 	origin: OriginFor<T>
-		// ) -> DispatchResult
-		// {
-		// 	// Check that the extrinsic was signed and get the signer.
-		// 	let sender = ensure_signed(origin)?;
+		/// Compute the roots of the current poll state trees. This operation must be performed prior to commiting the poll outcome. 
+		/// Registration tree may be merged as long as the registration period has elapsed, and the interaction tree may be merged 
+		/// as long as the voting period has elapsed. NB Coordinator's are required to call this extrinsic twice: once to merge the 
+		/// registration state tree, and once to merge the interaction state tree.
+		///
+		/// Emits `PollStateMerged`.
+		#[pallet::call_index(3)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))] 
+		pub fn merge_poll_state(
+			origin: OriginFor<T>
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			let sender = ensure_signed(origin)?;
 			
-		// 	// Get the coordinators most recent poll.
-		// 	let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
-		// 	let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
-		// 	let Some(poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+			// Get the coordinators most recent poll.
+			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+			let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
+			let Some(poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-		// 	// Check that the poll is not currently in the registration period.
-		// 	ensure!(
-		// 		!poll.is_registration_period(),
-		// 		Error::<T>::PollRegistrationInProgress
-		// 	);
+			// Check that the poll is not currently in the registration period.
+			ensure!(
+				!poll.is_registration_period(),
+				Error::<T>::PollRegistrationInProgress
+			);
 
-		// 	if poll.state.registrations.root.is_none()
-		// 	{
-		// 		// Ensure that there was at least one registration.
-		// 		ensure!(
-		// 			poll.state.registrations.hashes.len() > 0,
-		// 			Error::<T>::PollDataEmpty
-		// 		);
+			if poll.state.registrations.root.is_none()
+			{
+				// Ensure that there was at least one registration.
+				ensure!(
+					poll.state.registrations.hashes.len() > 0,
+					Error::<T>::PollDataEmpty
+				);
 
-		// 		// Compute the root of the registration tree and save it.
-		// 		let poll = poll.merge_registrations();
-		// 		Polls::<T>::insert(&poll_id, poll.clone());
+				// Compute the root of the registration tree and save it.
+				let poll = poll
+					.merge_registrations()
+					.map_err(|error| Error::<T>::MergeOperationFailed { reason: error.into() })?;
 
-		// 		// Emit the hash event.
-		// 		Self::deposit_event(Event::PollStateMerged {
-		// 			poll_id,
-		// 			registration_root: poll.state.registrations.root,
-		// 			interaction_root: None
-		// 		});
-		// 	}
+				Polls::<T>::insert(&poll_id, poll.clone());
 
-		// 	else if poll.state.interactions.root.is_none()
-		// 	{
-		// 		// Check that the poll is not currenltly in the voting period.
-		// 		ensure!(
-		// 			poll.is_over(),
-		// 			Error::<T>::PollVotingInProgress
-		// 		);
+				// Emit the hash event.
+				Self::deposit_event(Event::PollStateMerged {
+					poll_id,
+					registration_root: poll.state.registrations.root,
+					interaction_root: None
+				});
+			}
 
-		// 		// Ensure that there was at least one interaction.
-		// 		ensure!(
-		// 			poll.state.interactions.hashes.len() > 0,
-		// 			Error::<T>::PollDataEmpty
-		// 		);
+			else if poll.state.interactions.root.is_none()
+			{
+				// Check that the poll is not currenltly in the voting period.
+				ensure!(
+					poll.is_over(),
+					Error::<T>::PollVotingInProgress
+				);
 
-		// 		// Compute the root of the interaction tree and save it.
-		// 		let poll = poll.merge_interactions();
-		// 		Polls::<T>::insert(&poll_id, poll.clone());
+				// Ensure that there was at least one interaction.
+				ensure!(
+					poll.state.interactions.hashes.len() > 0,
+					Error::<T>::PollDataEmpty
+				);
 
-		// 		// Emit the hash event.
-		// 		Self::deposit_event(Event::PollStateMerged {
-		// 			poll_id,
-		// 			registration_root: None,
-		// 			interaction_root: poll.state.interactions.root
-		// 		});
-		// 	}
+				// Compute the root of the interaction tree and save it.
+				let poll = poll
+					.merge_interactions()
+					.map_err(|error| Error::<T>::MergeOperationFailed { reason: error.into() })?;
 
-		// 	// Poll data has already been merged.
-		// 	else { Err(<Error::<T>>::PollDataEmpty)? }
+				Polls::<T>::insert(&poll_id, poll.clone());
 
-		// 	Ok(())
-		// }
+				// Emit the hash event.
+				Self::deposit_event(Event::PollStateMerged {
+					poll_id,
+					registration_root: None,
+					interaction_root: poll.state.interactions.root
+				});
+			}
 
-// ======================================================================================================
+			// Poll data has already been merged.
+			else { Err(<Error::<T>>::PollDataEmpty)? }
+
+			Ok(())
+		}
 
 		// /// Permits the coordinator to commit, in batches, proofs that all of the valid participant registrations and poll interactions 
 		// /// were included in the computation which decided the winning vote option. Each individual proof carries a commitment value 
