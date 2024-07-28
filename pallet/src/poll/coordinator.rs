@@ -13,6 +13,15 @@ pub struct VerifyKey
     pub gamma_abc_g1: Vec<Vec<u8>>,
 }
 
+/// A serialized groth16 proof.
+#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+pub struct ProofData
+{
+    pub pi_a: Vec<u8>,
+    pub pi_b: Vec<u8>,
+    pub pi_c: Vec<u8>
+}
+
 /// Coordinator storage definition.
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 pub struct Coordinator

@@ -197,6 +197,9 @@ pub mod pallet
 		/// Poll outcome was previously committed and verified.
 		PollOutcomeAlreadyDetermined,
 
+		/// Poll state trees have not yet been merged.
+		PollStateNotMerged,
+
 		/// The key(s) provided are malformed.
 		MalformedKeys,
 
@@ -516,82 +519,82 @@ pub mod pallet
 			Ok(())
 		}
 
-		// /// Permits the coordinator to commit, in batches, proofs that all of the valid participant registrations and poll interactions 
-		// /// were included in the computation which decided the winning vote option. Each individual proof carries a commitment value 
-		// /// which is utilized to chain all of the proofs together, and in effect, to validate the final result.
-		// ///
-		// /// Calls to this extrinsic are rejected if the poll has not ended, or if the root of the state trees have not yet been computed.
-		// ///
-		// /// - `batches`: The ordered proofs alongside 
-		// /// - `outcome`: The index of the option voted for (from the `VoteOptions` vec in the poll configuration). This parameter
-		// ///				 should only be included only with the last batch, or in a separate call after the final batch has been verified.
-		// /// 
-		// /// Emits `PollOutcome` once the outcome been verified, and `PollCommitmentUpdated` to reflect the updated commitment.
-		// #[pallet::call_index(4)]
-		// #[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
-		// pub fn commit_outcome(
-		// 	origin: OriginFor<T>,
-		// 	batches: ProofBatches,
-		// 	outcome: Option<OutcomeIndex>
-		// ) -> DispatchResult
-		// {
-		// 	// Check that the extrinsic was signed and get the signer.
-		// 	let sender = ensure_signed(origin)?;
+		/// Permits the coordinator to commit, in batches, proofs that all of the valid participant registrations and poll interactions 
+		/// were included in the computation which decided the winning vote option. Each individual proof carries a commitment value 
+		/// which is utilized to chain all of the proofs together, and in effect, to validate the final result.
+		///
+		/// Calls to this extrinsic are rejected if the poll has not ended, or if the root of the state trees have not yet been computed.
+		///
+		/// - `batches`: The ordered proofs alongside 
+		/// - `outcome`: The index of the option voted for (from the `VoteOptions` vec in the poll configuration). This parameter
+		///				 should only be included only with the last batch, or in a separate call after the final batch has been verified.
+		/// 
+		/// Emits `PollOutcome` once the outcome been verified, and `PollCommitmentUpdated` to reflect the updated commitment.
+		#[pallet::call_index(4)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
+		pub fn commit_outcome(
+			origin: OriginFor<T>,
+			batches: ProofBatches,
+			outcome: Option<OutcomeIndex>
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			let sender = ensure_signed(origin)?;
 
-		// 	// Get the coordinators most recent poll.
-		// 	let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
-		// 	let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
-		// 	let Some(mut poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+			// Get the coordinators most recent poll.
+			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+			let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
+			let Some(mut poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-		// 	// Check that the state trees have been merged and that the outcome has not already been committed.
-		// 	ensure!(
-		// 		poll.is_merged() && !poll.is_fulfilled(),
-		// 		Error::<T>::PollOutcomeAlreadyDetermined
-		// 	);
+			// Check that the state trees have been merged 
+			ensure!(poll.is_merged(), Error::<T>::PollStateNotMerged);
 
-		// 	let (mut index, mut value) = poll.state.commitment;
+			//Check that the outcome has not already been committed.
+			ensure!(!poll.is_fulfilled(), Error::<T>::PollOutcomeAlreadyDetermined);
 
-		// 	// Verify each batch of proofs, in order.
-		// 	for (proof, commitment) in batches.iter()
-		// 	{
-		// 		ensure!(
-		// 			verify_proof(
-		// 				poll.clone(),
-		// 				coordinator.verify_key.clone(),
-		// 				*proof,
-		// 				*commitment
-		// 			),
-		// 			Error::<T>::MalformedProof
-		// 		);
-		// 		index += 1;
-		// 		value = *commitment;
-		// 		poll.state.commitment = (index, value);
-		// 	}
+			let (mut index, mut value) = poll.state.commitment;
 
-		// 	// Once the final batch is verified, check that the outcome matches the final commitment.
-		// 	if let Some(outcome) = verify_outcome(poll.clone(), outcome)
-		// 	{
-		// 		poll.state.outcome = Some(outcome);
+			// Verify each batch of proofs, in order.
+			for (proof, commitment) in batches.iter()
+			{
+				ensure!(
+					verify_proof(
+						poll.clone(),
+						coordinator.verify_key.clone(),
+						proof.clone(),
+						*commitment
+					),
+					Error::<T>::MalformedProof
+				);
+				index += 1;
+				value = *commitment;
+				poll.state.commitment = (index, value);
+			}
 
-		// 		Self::deposit_event(Event::PollOutcome { 
-		// 			poll_id,
-		// 			outcome
-		// 		});
-		// 	}
-		// 	else if batches.len() > 0
-		// 	{
-		// 		Self::deposit_event(Event::PollCommitmentUpdated {
-		// 			poll_id,
-		// 			commitment: (index, value)
-		// 		})
-		// 	}
-		// 	else { Err(<Error::<T>>::MalformedProof)? }
+			// Once the final batch is verified, check that the outcome matches the final commitment.
+			if let Some(outcome) = verify_outcome(poll.clone(), outcome)
+			{
+				poll.state.outcome = Some(outcome);
 
-		// 	// Update the poll state.
-		// 	Polls::<T>::insert(poll_id, poll);
+				Self::deposit_event(Event::PollOutcome { 
+					poll_id,
+					outcome
+				});
+			}
+			else if batches.len() > 0
+			{
+				Self::deposit_event(Event::PollCommitmentUpdated {
+					poll_id,
+					commitment: (index, value)
+				})
+			}
+			else { Err(<Error::<T>>::MalformedProof)? }
 
-		// 	Ok(())
-		// }
+			// Update the poll state.
+			Polls::<T>::insert(poll_id, poll);
+
+			Ok(())
+		}
 
 // ======================================================================================================
 
@@ -737,28 +740,28 @@ pub mod pallet
 		// }
 	}
 
-	// // ==========================================
-	// // TODO (M2) 
-	// fn verify_proof<T: Config>(
-	// 	_poll_data: Poll<T>,
-	// 	_verify_key: VerifyKey<T>,
-	// 	_proof_data: ProofData,
-	// 	_commitment: CommitmentData
-	// ) -> bool
-	// {
-	// 	true
-	// }
-	// fn verify_outcome<T: Config>(
-	// 	poll_data: Poll<T>,
-	// 	index: Option<OutcomeIndex>
-	// ) -> Option<Outcome>
-	// {
-	// 	let Some(index) = index else { return None };
-	// 	if (index as usize) < poll_data.config.vote_options.len()
-	// 	{
-	// 		return Some(poll_data.config.vote_options[index as usize]);
-	// 	}
+	// ==========================================
+	// TODO (M2) 
+	fn verify_proof<T: Config>(
+		_poll_data: Poll<T>,
+		_verify_key: VerifyKey,
+		_proof_data: ProofData,
+		_commitment: CommitmentData
+	) -> bool
+	{
+		true
+	}
+	fn verify_outcome<T: Config>(
+		poll_data: Poll<T>,
+		index: Option<OutcomeIndex>
+	) -> Option<Outcome>
+	{
+		let Some(index) = index else { return None };
+		if (index as usize) < poll_data.config.vote_options.len()
+		{
+			return Some(poll_data.config.vote_options[index as usize]);
+		}
 
-	// 	None
-	// }
+		None
+	}
 }
