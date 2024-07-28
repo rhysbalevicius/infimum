@@ -69,6 +69,20 @@ pub enum MerkleTreeError
     MergeFailed
 }
 
+impl From<MerkleTreeError> for u8
+{
+    fn from(error: MerkleTreeError) -> Self
+    {
+        match error
+        {
+            MerkleTreeError::TreeAlreadyFull => 1,
+            MerkleTreeError::TreeAlreadyMerged => 2,
+            MerkleTreeError::HashFailed => 3,
+            MerkleTreeError::MergeFailed => 4,
+        }
+    }
+}
+
 pub trait AmortizedIncrementalMerkleTree: Sized
 {
     /// The error type for the hash function.
