@@ -200,14 +200,20 @@ pub mod pallet
 		/// Poll state trees have not yet been merged.
 		PollStateNotMerged,
 
+		/// Poll state tree merge operation failed.
+		PollMergeFailed { reason: u8 },
+
+		/// Poll registration failed.
+		PollRegistrationFailed { reason: u8 },
+
+		/// Poll interaction failed.
+		PollInteractionFailed { reason: u8 },
+
 		/// The key(s) provided are malformed.
 		MalformedKeys,
 
 		/// A proof was rejected.
 		MalformedProof,
-
-		/// Poll state tree merge operation failed.
-		MergeOperationFailed { reason: u8 },
 	}
 
 	/// Map of ids to polls.
@@ -472,7 +478,7 @@ pub mod pallet
 				// Compute the root of the registration tree and save it.
 				let poll = poll
 					.merge_registrations()
-					.map_err(|error| Error::<T>::MergeOperationFailed { reason: error.into() })?;
+					.map_err(|error| Error::<T>::PollMergeFailed { reason: error.into() })?;
 
 				Polls::<T>::insert(&poll_id, poll.clone());
 
@@ -501,7 +507,7 @@ pub mod pallet
 				// Compute the root of the interaction tree and save it.
 				let poll = poll
 					.merge_interactions()
-					.map_err(|error| Error::<T>::MergeOperationFailed { reason: error.into() })?;
+					.map_err(|error| Error::<T>::PollMergeFailed { reason: error.into() })?;
 
 				Polls::<T>::insert(&poll_id, poll.clone());
 
@@ -596,95 +602,92 @@ pub mod pallet
 			Ok(())
 		}
 
-// ======================================================================================================
+		/// Permits the coordinator to nullify a poll which expired without recording a single interaction.
+		///
+		/// Calls to this extrinsic are rejected if the poll has not ended, or there was at least one interaction.
+		/// 
+		/// Emits `PollNullified`.
+		#[pallet::call_index(5)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
+		pub fn nullify_poll(
+			origin: OriginFor<T>
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			let sender = ensure_signed(origin)?;
 
-		// /// Permits the coordinator to nullify a poll which expired without recording a single interaction.
-		// ///
-		// /// Calls to this extrinsic are rejected if the poll has not ended, or there was at least one interaction.
-		// /// 
-		// /// Emits `PollNullified`.
-		// #[pallet::call_index(5)]
-		// #[pallet::weight(T::DbWeight::get().reads_writes(2, 1))]
-		// pub fn nullify_poll(
-		// 	origin: OriginFor<T>
-		// ) -> DispatchResult
-		// {
-		// 	// Check that the extrinsic was signed and get the signer.
-		// 	let sender = ensure_signed(origin)?;
+			// Get the coordinators most recent poll.
+			let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
+			let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
+			let Some(poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-		// 	// Get the coordinators most recent poll.
-		// 	let Some(coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
-		// 	let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
-		// 	let Some(poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+			ensure!(
+				(!poll.is_registration_period() && poll.state.registrations.count == 0) || 
+				(poll.is_over() && poll.state.interactions.count == 0),
+				Error::<T>::PollCurrentlyActive
+			);
 
-		// 	ensure!(
-		// 		(!poll.is_registration_period() && poll.state.registrations.count == 0) || 
-		// 		(poll.is_over() && poll.state.interactions.count == 0),
-		// 		Error::<T>::PollCurrentlyActive
-		// 	);
+			// Mark the poll as dead.
+			Polls::<T>::insert(poll_id, poll.nullify());
 
-		// 	// Mark the poll as dead.
-		// 	Polls::<T>::insert(poll_id, poll.nullify());
+			Ok(())
+		}
 
-		// 	Ok(())
-		// }
+		/// Permits a signer to participate in an upcoming poll. Rejected if signup period has elapsed.
+		///
+		///	- `poll_id`: The id of the poll.
+		/// - `public_key`: The ephemeral public key of the registrant.
+		///
+		/// Emits `ParticipantRegistered`.
+		#[pallet::call_index(6)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
+		pub fn register_as_participant(
+			origin: OriginFor<T>,
+			poll_id: PollId,
+			public_key: PublicKey
+		) -> DispatchResult
+		{
+			// Check that the extrinsic was signed and get the signer.
+			ensure_signed(origin)?;
 
-// ======================================================================================================
+			// Ensure that the poll exists and get it.
+			let Some(poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-		// /// Permits a signer to participate in an upcoming poll. Rejected if signup period has elapsed.
-		// ///
-		// ///	- `poll_id`: The id of the poll.
-		// /// - `public_key`: The ephemeral public key of the registrant.
-		// ///
-		// /// Emits `ParticipantRegistered`.
-		// #[pallet::call_index(6)]
-		// #[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
-		// pub fn register_as_participant(
-		// 	origin: OriginFor<T>,
-		// 	poll_id: PollId,
-		// 	public_key: PublicKey
-		// ) -> DispatchResult
-		// {
-		// 	// Check that the extrinsic was signed and get the signer.
-		// 	ensure_signed(origin)?;
+			// Check that the poll is still in the signup period.
+			ensure!(
+				poll.is_registration_period(),
+				Error::<T>::PollRegistrationHasEnded
+			);
 
-		// 	// Ensure that the poll exists and get it.
-		// 	let Some(poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+			// Check that the maximum number of sign-ups has not been reached.
+			ensure!(
+				!poll.registration_limit_reached(),
+				Error::<T>::ParticipantRegistrationLimitReached
+			);
 
-		// 	// Check that the poll is still in the signup period.
-		// 	ensure!(
-		// 		poll.is_registration_period(),
-		// 		Error::<T>::PollRegistrationHasEnded
-		// 	);
-
-		// 	// Check that the maximum number of sign-ups has not been reached.
-		// 	ensure!(
-		// 		!poll.registration_limit_reached(),
-		// 		Error::<T>::ParticipantRegistrationLimitReached
-		// 	);
-
-		// 	// Record the hash of the registration data.
-		// 	let block = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
+			// Record the hash of the registration data.
+			let block = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
 			
-		// 	// Insert the registration data into the poll state.
-		// 	let (count, poll) = poll.register_participant(public_key, block);
-		// 	Polls::<T>::insert(
-		// 		&poll_id, 
-		// 		poll
-		// 	);
+			// Insert the registration data into the poll state.
+			let (count, poll) = poll
+				.register_participant(public_key, block)
+				.map_err(|error| Error::<T>::PollRegistrationFailed { reason: error.into() })?;
 
-		// 	// Emit the registration data for future processing by the coordinator.
-		// 	Self::deposit_event(Event::ParticipantRegistered { 
-		// 		poll_id,
-		// 		count,
-		// 		public_key,
-		// 		block
-		// 	});
+			Polls::<T>::insert(
+				&poll_id, 
+				poll
+			);
 
-		// 	Ok(())
-		// }
+			// Emit the registration data for future processing by the coordinator.
+			Self::deposit_event(Event::ParticipantRegistered { 
+				poll_id,
+				count,
+				public_key,
+				block
+			});
 
-// ======================================================================================================
+			Ok(())
+		}
 
 		// /// Permits a signer to interact with an ongoing poll. Rejects if not within the voting period. 
 		// /// Valid messages include: a vote, and a key rotation. Participants may secretly call this 
