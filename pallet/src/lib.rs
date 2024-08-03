@@ -689,58 +689,61 @@ pub mod pallet
 			Ok(())
 		}
 
-		// /// Permits a signer to interact with an ongoing poll. Rejects if not within the voting period. 
-		// /// Valid messages include: a vote, and a key rotation. Participants may secretly call this 
-		// /// method (read: using a different signer) in order to override their previous vote. 
-		// ///
-		// /// - `poll_id`: The index of the poll in storage.
-		// /// - `public_key`: The current ephemeral public key of the registrant. May be different than 
-		// ///					the one used for registration.
-		// /// - `data`: The encrypted interaction data.
-		// ///
-		// /// Emits `PollInteraction`.
-		// #[pallet::call_index(7)]
-		// #[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
-		// pub fn interact_with_poll(
-		// 	origin: OriginFor<T>,
-		// 	poll_id: PollId,
-		// 	public_key: PublicKey,
-		// 	data: PollInteractionData
-		// ) -> DispatchResult
-		// {
-		// 	// Ensure that the extrinsic was signed.
-		// 	ensure_signed(origin)?;
+		/// Permits a signer to interact with an ongoing poll. Rejects if not within the voting period. 
+		/// Valid messages include: a vote, and a key rotation. Participants may secretly call this 
+		/// method (read: using a different signer) in order to override their previous vote. 
+		///
+		/// - `poll_id`: The index of the poll in storage.
+		/// - `public_key`: The current ephemeral public key of the registrant. May be different than 
+		///					the one used for registration.
+		/// - `data`: The encrypted interaction data.
+		///
+		/// Emits `PollInteraction`.
+		#[pallet::call_index(7)]
+		#[pallet::weight(T::DbWeight::get().reads_writes(1, 1))]
+		pub fn interact_with_poll(
+			origin: OriginFor<T>,
+			poll_id: PollId,
+			public_key: PublicKey,
+			data: PollInteractionData
+		) -> DispatchResult
+		{
+			// Ensure that the extrinsic was signed.
+			ensure_signed(origin)?;
 
-		// 	// Ensure that the poll exists and get it.
-		// 	let Some(poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
+			// Ensure that the poll exists and get it.
+			let Some(poll) = Polls::<T>::get(&poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-		// 	// Confirm that the poll is currently within it's voting period.
-		// 	ensure!(!poll.is_registration_period(), Error::<T>::PollRegistrationInProgress);
-		// 	ensure!(!poll.is_over(), Error::<T>::PollVotingHasEnded);
+			// Confirm that the poll is currently within it's voting period.
+			ensure!(!poll.is_registration_period(), Error::<T>::PollRegistrationInProgress);
+			ensure!(!poll.is_over(), Error::<T>::PollVotingHasEnded);
 
-		// 	// Check that we've not reached the maximum number of interactions.
-		// 	ensure!(
-		// 		!poll.interaction_limit_reached(),
-		// 		Error::<T>::ParticipantInteractionLimitReached
-		// 	);
+			// Check that we've not reached the maximum number of interactions.
+			ensure!(
+				!poll.interaction_limit_reached(),
+				Error::<T>::ParticipantInteractionLimitReached
+			);
 
-		// 	// Insert the interaction data into the poll state.
-		// 	let (count, poll) = poll.consume_interaction(public_key, data);
-		// 	Polls::<T>::insert(
-		// 		&poll_id, 
-		// 		poll
-		// 	);
+			// Insert the interaction data into the poll state.
+			let (count, poll) = poll
+				.consume_interaction(public_key, data)
+				.map_err(|error| Error::<T>::PollInteractionFailed { reason: error.into() })?;
 
-		// 	// Emit the interaction data for future processing by the coordinator.
-		// 	Self::deposit_event(Event::PollInteraction {
-		// 		poll_id,
-		// 		count,
-		// 		public_key,
-		// 		data
-		// 	});
+			Polls::<T>::insert(
+				&poll_id, 
+				poll
+			);
 
-		// 	Ok(())
-		// }
+			// Emit the interaction data for future processing by the coordinator.
+			Self::deposit_event(Event::PollInteraction {
+				poll_id,
+				count,
+				public_key,
+				data
+			});
+
+			Ok(())
+		}
 	}
 
 	// ==========================================
