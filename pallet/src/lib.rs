@@ -4,6 +4,25 @@ pub use pallet::*;
 use sp_std::vec;
 use sp_runtime::traits::SaturatedConversion;
 
+use ark_bn254::{
+    Bn254,
+    Fr,
+    Fq, 
+    Fq2, 
+    G1Affine, 
+    G1Projective, 
+    G2Affine, 
+    G2Projective
+};
+use ark_ff::{BigInteger256, PrimeField};
+use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
+use ark_crypto_primitives::snark::SNARK;
+use ark_groth16::{
+    Groth16,
+    data_structures::Proof,
+    data_structures::VerifyingKey
+};
+
 pub mod hash;
 pub mod poll;
 
@@ -267,11 +286,8 @@ pub mod pallet
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			// TODO: try to serialize with `Groth16::<Bn254>::process_vk`
-			// ensure!(verify_key.len() > 0, Error::<T>::MalformedKeys);
-			// let verify_key: VerifyKey<T> = verify_key
-			// 	.try_into()
-			// 	.map_err(|_| Error::<T>::MalformedKeys)?;
+			// Ensure the verification key can be serialized as affine points.
+			ensure!(serialize_vkey(verify_key.clone()).is_some(), Error::<T>::MalformedKeys);
 
 			// A coordinator may only be registered once.
 			ensure!(
@@ -314,11 +330,8 @@ pub mod pallet
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			// TODO: try to serialize with `Groth16::<Bn254>::process_vk`
-			// ensure!(verify_key.len() > 0, Error::<T>::MalformedKeys);
-			// let verify_key: VerifyKey<T> = verify_key
-			// 	.try_into()
-			// 	.map_err(|_| Error::<T>::MalformedKeys)?;
+			// Ensure the verification key can be serialized as affine points.
+			ensure!(serialize_vkey(verify_key.clone()).is_some(), Error::<T>::MalformedKeys);
 
 			// Check if origin is registered as a coordinator.
 			let Some(mut coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
@@ -746,17 +759,40 @@ pub mod pallet
 		}
 	}
 
-	// ==========================================
-	// TODO (M2) 
+	fn serialize_vkey(
+		vkey: VerifyKey
+	) -> Option<VerifyingKey::<Bn254>>
+	{
+		let Some(alpha_g1) = G1Affine::deserialize_uncompressed(&*vkey.alpha_g1).ok() else { return None; };
+		let Some(beta_g2) = G2Affine::deserialize_uncompressed(&*vkey.beta_g2).ok() else { return None; };
+		let Some(gamma_g2) = G2Affine::deserialize_uncompressed(&*vkey.gamma_g2).ok() else { return None; };
+		let Some(delta_g2) = G2Affine::deserialize_uncompressed(&*vkey.delta_g2).ok() else { return None; };
+		let gamma_abc_g1 = match vkey.gamma_abc_g1
+			.iter()
+			.map(|g| G1Affine::deserialize_uncompressed(g.as_slice()))
+			.collect::<Result<Vec<G1Affine>, _>>()
+		{
+			Ok(value) => value,
+			Err(_) => return None
+		};
+
+		Some(VerifyingKey::<Bn254> { alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1 })
+	}
+
 	fn verify_proof<T: Config>(
-		_poll_data: Poll<T>,
-		_verify_key: VerifyKey,
-		_proof_data: ProofData,
-		_commitment: CommitmentData
+		poll: Poll<T>,
+		verify_key: VerifyKey,
+		proof_data: ProofData,
+		new_commitment: CommitmentData
 	) -> bool
 	{
+
+
+		// Groth16::<Bn254>::process_vk(&verify_key)
+
 		true
 	}
+
 	fn verify_outcome<T: Config>(
 		poll_data: Poll<T>,
 		index: Option<OutcomeIndex>
