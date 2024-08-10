@@ -7,15 +7,10 @@ use sp_runtime::traits::SaturatedConversion;
 use ark_bn254::{
     Bn254,
     Fr,
-    Fq, 
-    Fq2, 
     G1Affine, 
-    G1Projective, 
-    G2Affine, 
-    G2Projective
+    G2Affine
 };
-use ark_ff::{BigInteger256, PrimeField};
-use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
+use ark_serialize::{CanonicalDeserialize};
 use ark_crypto_primitives::snark::SNARK;
 use ark_groth16::{
     Groth16,
@@ -576,22 +571,14 @@ pub mod pallet
 			// Verify each batch of proofs, in order.
 			for (proof, commitment) in batches.iter()
 			{
-				// TODO:
-				// ensure!(
-				// 	verify_proof(
-				// 		poll.clone(),
-				// 		coordinator.verify_key.clone(),
-				// 		proof.clone(),
-				// 		*commitment
-				// 	),
-				// 	Error::<T>::MalformedProof
-				// );
-
-				// let inputs: Vec<Fr> = img.inputs
-				// 	.iter()
-				// 	.map(|g| Fr::deserialize_uncompressed(g.as_slice()))
-				// 	.collect::<Result<_, _>>()
-				// 	.unwrap();
+				ensure!(
+					verify_proof(
+						coordinator.verify_key.clone(),
+						poll.clone().get_proof_inputs(*commitment),
+						proof.clone()
+					),
+					Error::<T>::MalformedProof
+				);
 
 				index += 1;
 				value = *commitment;
@@ -798,17 +785,17 @@ pub mod pallet
 		Some(Proof::<Bn254> { a, b, c })
 	}
 
-	fn verify_proof<T: Config>(
-		poll: Poll<T>,
+	fn verify_proof(
 		verify_key: VerifyKey,
-		proof_data: ProofData,
-		public_inputs: Vec<Fr>
+		public_inputs: Vec<Fr>,
+		proof_data: ProofData
 	) -> bool
 	{
 		let Some(vk) = serialize_vkey(verify_key) else { return false; };
 		let Some(pvk) = Groth16::<Bn254>::process_vk(&vk).ok() else { return false; };
 		let Some(proof) = serialize_proof(proof_data) else { return false; };
 		let Some(result) = Groth16::<Bn254>::verify_with_processed_vk(&pvk, &public_inputs, &proof).ok() else { return false; };
+
 		result
 	}
 

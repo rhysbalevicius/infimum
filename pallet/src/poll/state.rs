@@ -43,7 +43,7 @@ pub struct PollStateTree
     /// The true depth of the tree (i.e., consisting of non-zero leaves).
     pub depth: u8,
 
-    /// The arity of the tree.
+    /// The immutable arity of the tree.
     pub arity: u8,
 
     /// The number of non-nil leaves.

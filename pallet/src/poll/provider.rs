@@ -9,6 +9,7 @@ use crate::poll::{
     PollInteractionData,
     AmortizedIncrementalMerkleTree, 
     MerkleTreeError,
+    HashBytes,
     zeroes::EMPTY_BALLOT_ROOT
 };
 
@@ -29,6 +30,8 @@ pub trait PollProvider<T: crate::Config>: Sized
     fn merge_registrations(self) -> Result<Self, MerkleTreeError>;
 
     fn merge_interactions(self) -> Result<Self, MerkleTreeError>;
+
+    fn get_proof_inputs(self, new_commitment: HashBytes) -> Vec<Fr>;
     
     fn registration_limit_reached(&self) -> bool;
 
@@ -155,6 +158,30 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
     {
         self.state.interactions = self.state.interactions.merge()?;
         Ok(self)
+    }
+
+    // "numSignUps",
+    // "index",
+    // "batchEndIndex",
+    // "msgRoot",
+    // "currentSbCommitment",
+    // "newSbCommitment",
+    // "pollEndTimestamp",
+    // "actualStateTreeDepth",
+    // "coordinatorPublicKeyHash"
+
+    // let inputs: Vec<Fr> = img.inputs
+    // 	.iter()
+    // 	.map(|g| Fr::deserialize_uncompressed(g.as_slice()))
+    // 	.collect::<Result<_, _>>()
+    // 	.unwrap();
+
+    fn get_proof_inputs(
+        self,
+        new_commitment: HashBytes
+    ) -> Vec<Fr>
+    {
+        Vec::<Fr>::new()
     }
 
     fn registration_limit_reached(&self) -> bool
