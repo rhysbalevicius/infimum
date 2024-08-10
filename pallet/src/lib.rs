@@ -576,15 +576,23 @@ pub mod pallet
 			// Verify each batch of proofs, in order.
 			for (proof, commitment) in batches.iter()
 			{
-				ensure!(
-					verify_proof(
-						poll.clone(),
-						coordinator.verify_key.clone(),
-						proof.clone(),
-						*commitment
-					),
-					Error::<T>::MalformedProof
-				);
+				// TODO:
+				// ensure!(
+				// 	verify_proof(
+				// 		poll.clone(),
+				// 		coordinator.verify_key.clone(),
+				// 		proof.clone(),
+				// 		*commitment
+				// 	),
+				// 	Error::<T>::MalformedProof
+				// );
+
+				// let inputs: Vec<Fr> = img.inputs
+				// 	.iter()
+				// 	.map(|g| Fr::deserialize_uncompressed(g.as_slice()))
+				// 	.collect::<Result<_, _>>()
+				// 	.unwrap();
+
 				index += 1;
 				value = *commitment;
 				poll.state.commitment = (index, value);
@@ -779,18 +787,29 @@ pub mod pallet
 		Some(VerifyingKey::<Bn254> { alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1 })
 	}
 
+	fn serialize_proof(
+		proof_data: ProofData
+	) -> Option<Proof::<Bn254>>
+	{
+	    let Some(a) = G1Affine::deserialize_uncompressed(&*proof_data.pi_a).ok() else { return None; };
+	    let Some(b) = G2Affine::deserialize_uncompressed(&*proof_data.pi_b).ok() else { return None; };
+	    let Some(c) = G1Affine::deserialize_uncompressed(&*proof_data.pi_c).ok() else { return None; };
+
+		Some(Proof::<Bn254> { a, b, c })
+	}
+
 	fn verify_proof<T: Config>(
 		poll: Poll<T>,
 		verify_key: VerifyKey,
 		proof_data: ProofData,
-		new_commitment: CommitmentData
+		public_inputs: Vec<Fr>
 	) -> bool
 	{
-
-
-		// Groth16::<Bn254>::process_vk(&verify_key)
-
-		true
+		let Some(vk) = serialize_vkey(verify_key) else { return false; };
+		let Some(pvk) = Groth16::<Bn254>::process_vk(&vk).ok() else { return false; };
+		let Some(proof) = serialize_proof(proof_data) else { return false; };
+		let Some(result) = Groth16::<Bn254>::verify_with_processed_vk(&pvk, &public_inputs, &proof).ok() else { return false; };
+		result
 	}
 
 	fn verify_outcome<T: Config>(
