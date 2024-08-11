@@ -2,19 +2,30 @@ use frame_support::pallet_prelude::*;
 use sp_runtime::traits::SaturatedConversion;
 use ark_bn254::{Fr};
 use ark_ff::{PrimeField, BigInteger};
+use ark_serialize::{CanonicalDeserialize};
 use crate::hash::{Poseidon, PoseidonHasher};
 use crate::poll::{
+    AmortizedIncrementalMerkleTree, 
+    BlockNumber,
+    CommitmentIndex,
+    HashBytes,
+    MerkleTreeError,
     Poll, 
     PublicKey,
     PollInteractionData,
-    AmortizedIncrementalMerkleTree, 
-    MerkleTreeError,
-    HashBytes,
     zeroes::EMPTY_BALLOT_ROOT
 };
 
 pub trait PollProvider<T: crate::Config>: Sized
 {
+    fn get_proof_public_inputs(
+        self,
+        proof_index: CommitmentIndex,
+        coord_pub_key: PublicKey,
+        curr_commitment: HashBytes,
+        new_commitment: HashBytes
+    ) -> Vec<Fr>;
+
     fn register_participant(
         self, 
         public_key: PublicKey, 
@@ -30,8 +41,6 @@ pub trait PollProvider<T: crate::Config>: Sized
     fn merge_registrations(self) -> Result<Self, MerkleTreeError>;
 
     fn merge_interactions(self) -> Result<Self, MerkleTreeError>;
-
-    fn get_proof_inputs(self, new_commitment: HashBytes) -> Vec<Fr>;
     
     fn registration_limit_reached(&self) -> bool;
 
@@ -40,6 +49,8 @@ pub trait PollProvider<T: crate::Config>: Sized
     fn is_voting_period(&self) -> bool;
 
     fn is_registration_period(&self) -> bool;
+
+    fn get_voting_period_end(&self) -> BlockNumber;
 
     fn is_over(&self) -> bool;
 
@@ -54,6 +65,63 @@ pub trait PollProvider<T: crate::Config>: Sized
 
 impl<T: crate::Config> PollProvider<T> for Poll<T>
 {
+    fn get_proof_public_inputs(
+        self,
+        proof_index: CommitmentIndex,
+        coord_pub_key: PublicKey,
+        curr_commitment: HashBytes,
+        new_commitment: HashBytes
+    ) -> Vec<Fr>
+    {
+        let mut inputs: Vec<Fr> = Vec::<Fr>::new();
+
+        let message_batch_size: u32 = self.state.interactions.arity.pow(self.config.process_subtree_depth).into();
+        let mut current_batch_index = self.state.interactions.count;
+        if current_batch_index > 0
+        {
+            let r = self.state.interactions.count % message_batch_size;
+            if r == 0 { current_batch_index -= message_batch_size; }
+            else { current_batch_index -= r; }
+        }
+        let index_offset = proof_index * message_batch_size;
+
+        // Return inputs for message processing circuit
+        if index_offset <= current_batch_index
+        {
+            current_batch_index -= index_offset;
+
+            let Some(mut hasher) = Poseidon::<Fr>::new_circom(2).ok() else { return inputs; };
+            let coord_pub_key_fr: Vec<Fr> = Vec::from([ coord_pub_key.x, coord_pub_key.y ])
+                .iter()
+                .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
+                .collect();
+            let Some(coord_pub_key_hash) = hasher.hash(&coord_pub_key_fr).ok() else { return inputs; };
+            let Some(root_bytes) = self.state.interactions.root else { return inputs; };
+            let Some(interaction_root) = Fr::deserialize_uncompressed(&root_bytes[..]).ok() else { return inputs; };
+            let Some(new_commitment_fr) = Fr::deserialize_uncompressed(&new_commitment[..]).ok() else { return inputs; };
+            let Some(curr_commitment_fr) = Fr::deserialize_uncompressed(&curr_commitment[..]).ok() else { return inputs; };
+            
+            inputs.push(Fr::from(self.state.registrations.count));
+            inputs.push(Fr::from(self.get_voting_period_end()));
+            inputs.push(interaction_root);
+            inputs.push(Fr::from(self.state.registrations.depth));
+            inputs.push(Fr::from(current_batch_index + message_batch_size));
+            inputs.push(Fr::from(current_batch_index));
+            inputs.push(coord_pub_key_hash);
+            inputs.push(curr_commitment_fr);
+            inputs.push(new_commitment_fr);
+    
+            inputs
+        }
+
+        // Return inputs for tally circuit
+        else
+        {
+            // TODO
+            return inputs;
+        }
+    }
+
     fn register_participant(
         mut self, 
         public_key: PublicKey,
@@ -62,16 +130,12 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
     {
         let Some(mut hasher) = Poseidon::<Fr>::new_circom(4).ok() else { Err(MerkleTreeError::HashFailed)? };
 
-        let mut timestamp_bytes = [0u8; 32];
-        timestamp_bytes[24..].copy_from_slice(&timestamp.to_be_bytes());
-
-        let mut credit_bytes = [0u8; 32];
-        credit_bytes[31] = 1;
-
-        let inputs: Vec<Fr> = Vec::from([ public_key.x, public_key.y, credit_bytes, timestamp_bytes ])
+        let mut inputs: Vec<Fr> = Vec::from([ public_key.x, public_key.y ])
             .iter()
             .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
             .collect();
+        inputs.push(Fr::from(1));
+        inputs.push(Fr::from(timestamp));
 
         let Some(result) = hasher.hash(&inputs).ok() else { Err(MerkleTreeError::HashFailed)? };
         let bytes = result.into_bigint().to_bytes_be();
@@ -160,30 +224,6 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         Ok(self)
     }
 
-    // "numSignUps",
-    // "index",
-    // "batchEndIndex",
-    // "msgRoot",
-    // "currentSbCommitment",
-    // "newSbCommitment",
-    // "pollEndTimestamp",
-    // "actualStateTreeDepth",
-    // "coordinatorPublicKeyHash"
-
-    // let inputs: Vec<Fr> = img.inputs
-    // 	.iter()
-    // 	.map(|g| Fr::deserialize_uncompressed(g.as_slice()))
-    // 	.collect::<Result<_, _>>()
-    // 	.unwrap();
-
-    fn get_proof_inputs(
-        self,
-        new_commitment: HashBytes
-    ) -> Vec<Fr>
-    {
-        Vec::<Fr>::new()
-    }
-
     fn registration_limit_reached(&self) -> bool
     {
         self.state.registrations.count >= self.config.max_registrations
@@ -210,13 +250,16 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
 		now >= self.created_at && now < self.created_at + self.config.signup_period
 	}
 
+    fn get_voting_period_end(&self) -> BlockNumber
+    {
+        self.created_at + self.config.signup_period + self.config.voting_period
+    }
+
     /// Returns true iff poll has ended.
     fn is_over(&self) -> bool
     {
 		let now = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
-		let voting_period_start = self.created_at + self.config.signup_period;
-		let voting_period_end = voting_period_start + self.config.voting_period;
-		now > voting_period_end
+		now > self.get_voting_period_end()
     }
 
     /// Returns true iff poll outcome has been committed to state, or the poll is dead.
