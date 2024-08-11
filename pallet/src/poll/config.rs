@@ -15,6 +15,9 @@ pub struct PollConfiguration<T: crate::Config>
     /// The maximum number of participants permitted.
     pub max_registrations: u32,
 
+    /// The subtree depth to process per commitment.
+    pub process_subtree_depth: u32,
+
     /// The possible outcomes of the poll.
     pub vote_options: VoteOptions<T>,
 }
