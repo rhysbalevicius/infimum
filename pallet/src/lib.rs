@@ -374,6 +374,7 @@ pub mod pallet
 			signup_period: BlockNumber,
 			voting_period: BlockNumber,
 			max_registrations: u32,
+			process_subtree_depth: u32,
 			vote_options: vec::Vec<u128>
 		) -> DispatchResult
 		{
@@ -428,6 +429,7 @@ pub mod pallet
 					signup_period,
 					voting_period,
 					max_registrations,
+					process_subtree_depth,
 					vote_options
 				}
 			});
@@ -566,23 +568,28 @@ pub mod pallet
 			//Check that the outcome has not already been committed.
 			ensure!(!poll.is_fulfilled(), Error::<T>::PollOutcomeAlreadyDetermined);
 
-			let (mut index, mut value) = poll.state.commitment;
+			let (mut index, mut cur_commitment) = poll.state.commitment;
 
 			// Verify each batch of proofs, in order.
-			for (proof, commitment) in batches.iter()
+			for (proof, new_commitment) in batches.iter()
 			{
 				ensure!(
 					verify_proof(
 						coordinator.verify_key.clone(),
-						poll.clone().get_proof_inputs(*commitment),
+						poll.clone().get_proof_public_inputs(
+							index,
+							coordinator.public_key.clone(),
+							cur_commitment,
+							*new_commitment
+						),
 						proof.clone()
 					),
 					Error::<T>::MalformedProof
 				);
 
 				index += 1;
-				value = *commitment;
-				poll.state.commitment = (index, value);
+				cur_commitment = *new_commitment;
+				poll.state.commitment = (index, cur_commitment);
 			}
 
 			// Once the final batch is verified, check that the outcome matches the final commitment.
@@ -599,7 +606,7 @@ pub mod pallet
 			{
 				Self::deposit_event(Event::PollCommitmentUpdated {
 					poll_id,
-					commitment: (index, value)
+					commitment: (index, cur_commitment)
 				})
 			}
 			else { Err(<Error::<T>>::MalformedProof)? }
