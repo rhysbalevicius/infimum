@@ -1,4 +1,5 @@
 use frame_support::pallet_prelude::*;
+use sp_std::vec;
 use crate::poll::{PollConfiguration, PollState, ProofData};
 use crate::hash::poseidon::{HASH_LEN};
 
@@ -11,7 +12,7 @@ pub type Outcome = u128;
 pub type OutcomeIndex = u32;
 pub type PollId = u32;
 pub type PollInteractionData = [[u8; 32]; 10]; 
-pub type ProofBatches = Vec<(ProofData, CommitmentData)>;
+pub type ProofBatches = vec::Vec<(ProofData, CommitmentData)>;
 pub type VoteOptions<T> = BoundedVec<u128, <T as crate::Config>::MaxVoteOptions>;
 
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]

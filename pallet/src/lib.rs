@@ -772,7 +772,7 @@ pub mod pallet
 		let gamma_abc_g1 = match vkey.gamma_abc_g1
 			.iter()
 			.map(|g| G1Affine::deserialize_uncompressed(g.as_slice()))
-			.collect::<Result<Vec<G1Affine>, _>>()
+			.collect::<Result<vec::Vec<G1Affine>, _>>()
 		{
 			Ok(value) => value,
 			Err(_) => return None
@@ -794,7 +794,7 @@ pub mod pallet
 
 	fn verify_proof(
 		verify_key: VerifyKey,
-		public_inputs: Vec<Fr>,
+		public_inputs: vec::Vec<Fr>,
 		proof_data: ProofData
 	) -> bool
 	{

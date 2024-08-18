@@ -1,4 +1,5 @@
 use frame_support::pallet_prelude::*;
+use sp_std::vec;
 use sp_runtime::traits::SaturatedConversion;
 use ark_bn254::{Fr};
 use ark_ff::{PrimeField, BigInteger};
@@ -24,7 +25,7 @@ pub trait PollProvider<T: crate::Config>: Sized
         coord_pub_key: PublicKey,
         curr_commitment: HashBytes,
         new_commitment: HashBytes
-    ) -> Vec<Fr>;
+    ) -> vec::Vec<Fr>;
 
     fn register_participant(
         self, 
@@ -71,9 +72,9 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         coord_pub_key: PublicKey,
         curr_commitment: HashBytes,
         new_commitment: HashBytes
-    ) -> Vec<Fr>
+    ) -> vec::Vec<Fr>
     {
-        let mut inputs: Vec<Fr> = Vec::<Fr>::new();
+        let mut inputs: vec::Vec<Fr> = vec::Vec::<Fr>::new();
 
         let message_batch_size: u32 = self.state.interactions.arity.pow(self.config.process_subtree_depth).into();
         let mut current_batch_index = self.state.interactions.count;
@@ -91,7 +92,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
             current_batch_index -= index_offset;
 
             let Some(mut hasher) = Poseidon::<Fr>::new_circom(2).ok() else { return inputs; };
-            let coord_pub_key_fr: Vec<Fr> = Vec::from([ coord_pub_key.x, coord_pub_key.y ])
+            let coord_pub_key_fr: vec::Vec<Fr> = vec::Vec::from([ coord_pub_key.x, coord_pub_key.y ])
                 .iter()
                 .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
                 .collect();
@@ -130,7 +131,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
     {
         let Some(mut hasher) = Poseidon::<Fr>::new_circom(4).ok() else { Err(MerkleTreeError::HashFailed)? };
 
-        let mut inputs: Vec<Fr> = Vec::from([ public_key.x, public_key.y ])
+        let mut inputs: vec::Vec<Fr> = vec::Vec::from([ public_key.x, public_key.y ])
             .iter()
             .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
             .collect();
@@ -156,12 +157,12 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         let Some(mut hash4) = Poseidon::<Fr>::new_circom(4).ok() else { Err(MerkleTreeError::HashFailed)? };
         let Some(mut hash5) = Poseidon::<Fr>::new_circom(5).ok() else { Err(MerkleTreeError::HashFailed)? };
 
-        let left_inputs: Vec<Fr> = Vec::from([ data[0], data[1], data[2], data[3], data[4] ])
+        let left_inputs: vec::Vec<Fr> = vec::Vec::from([ data[0], data[1], data[2], data[3], data[4] ])
             .iter()
             .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
             .collect();
 
-        let right_inputs: Vec<Fr> = Vec::from([ data[5], data[6], data[7], data[8], data[9] ])
+        let right_inputs: vec::Vec<Fr> = vec::Vec::from([ data[5], data[6], data[7], data[8], data[9] ])
             .iter()
             .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
             .collect();
@@ -172,11 +173,11 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         let left_bytes = left.into_bigint().to_bytes_be();
         let right_bytes = right.into_bigint().to_bytes_be();
 
-        let inputs: Vec<Fr> = Vec::from([
+        let inputs: vec::Vec<Fr> = vec::Vec::from([
             left_bytes,
             right_bytes,
-            Vec::from(public_key.x),
-            Vec::from(public_key.y)
+            vec::Vec::from(public_key.x),
+            vec::Vec::from(public_key.y)
         ])
             .iter()
             .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
@@ -201,7 +202,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         let Some(root) = self.state.registrations.root else { Err(MerkleTreeError::MergeFailed)? };
         let Some(mut hasher) = Poseidon::<Fr>::new_circom(3).ok() else { Err(MerkleTreeError::HashFailed)? };
 
-        let inputs: Vec<Fr> = Vec::from([ root, EMPTY_BALLOT_ROOT, [0u8;32] ])
+        let inputs: vec::Vec<Fr> = vec::Vec::from([ root, EMPTY_BALLOT_ROOT, [0u8;32] ])
             .iter()
             .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
             .collect();

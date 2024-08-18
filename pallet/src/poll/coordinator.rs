@@ -1,4 +1,5 @@
 use frame_support::pallet_prelude::*;
+use sp_std::vec;
 
 use crate::poll::{PollId};
 
@@ -6,20 +7,20 @@ use crate::poll::{PollId};
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 pub struct VerifyKey
 {
-    pub alpha_g1: Vec<u8>,
-    pub beta_g2: Vec<u8>,
-    pub gamma_g2: Vec<u8>,
-    pub delta_g2: Vec<u8>,
-    pub gamma_abc_g1: Vec<Vec<u8>>,
+    pub alpha_g1: vec::Vec<u8>,
+    pub beta_g2: vec::Vec<u8>,
+    pub gamma_g2: vec::Vec<u8>,
+    pub delta_g2: vec::Vec<u8>,
+    pub gamma_abc_g1: vec::Vec<vec::Vec<u8>>,
 }
 
 /// A serialized groth16 proof.
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 pub struct ProofData
 {
-    pub pi_a: Vec<u8>,
-    pub pi_b: Vec<u8>,
-    pub pi_c: Vec<u8>
+    pub pi_a: vec::Vec<u8>,
+    pub pi_b: vec::Vec<u8>,
+    pub pi_c: vec::Vec<u8>
 }
 
 /// Coordinator storage definition.

@@ -1,4 +1,5 @@
 use frame_support::pallet_prelude::*;
+use sp_std::vec;
 use ark_bn254::{Fr};
 use ark_ff::{PrimeField, BigInteger};
 use crate::poll::{Commitment, Outcome, HashBytes, zeroes::get_merkle_zeroes};
@@ -50,7 +51,7 @@ pub struct PollStateTree
     pub count: u32,
 
     /// The (depth, hash) pairs of the incrementally merged subtrees.
-    pub hashes: Vec<(u8, HashBytes)>,
+    pub hashes: vec::Vec<(u8, HashBytes)>,
 
     /// The root of the tree of maximal depth which contains the
     /// leaves of `hashes` and zeros elsewhere.
@@ -98,7 +99,7 @@ pub trait AmortizedIncrementalMerkleTree: Sized
     fn merge(self) -> Result<Self, MerkleTreeError>;
 
     /// Hash function used to compute roots.
-    fn hash(inputs: Vec<HashBytes>) -> Result<HashBytes, Self::HashError>;
+    fn hash(inputs: vec::Vec<HashBytes>) -> Result<HashBytes, Self::HashError>;
 }
 
 const FULL_TREE_DEPTH: u8 = 32;
@@ -113,7 +114,7 @@ impl AmortizedIncrementalMerkleTree for PollStateTree
             arity,
             depth: 0,
             count: 0,
-            hashes: Vec::<(u8, HashBytes)>::new(),
+            hashes: vec::Vec::<(u8, HashBytes)>::new(),
             root: None
         }
     }
@@ -147,7 +148,7 @@ impl AmortizedIncrementalMerkleTree for PollStateTree
             // If the subtree is full compute the corresponding subtree root.
             if subtree.iter().all(|&(d, _)| d == depth)
             {
-                let leaves: Vec<HashBytes> = subtree
+                let leaves: vec::Vec<HashBytes> = subtree
                     .iter()
                     .map(|&(_, hash)| hash)
                     .collect();
@@ -203,7 +204,7 @@ impl AmortizedIncrementalMerkleTree for PollStateTree
             let depth = last.0;
             if depth >= FULL_TREE_DEPTH { break; }
 
-            let mut subtree: Vec<_> = self.hashes
+            let mut subtree: vec::Vec<_> = self.hashes
                 .iter()
                 .rev()
                 .take_while(|(d, _)| *d == last.0)
@@ -231,11 +232,11 @@ impl AmortizedIncrementalMerkleTree for PollStateTree
     }
 
     /// Poseidon hash function with circom domain tag.
-    fn hash(inputs: Vec<HashBytes>) -> Result<HashBytes, Self::HashError>
+    fn hash(inputs: vec::Vec<HashBytes>) -> Result<HashBytes, Self::HashError>
     {
         let mut hasher = Poseidon::<Fr>::new_circom(inputs.len())?;
 
-        let fr_inputs: Vec<Fr> = inputs
+        let fr_inputs: vec::Vec<Fr> = inputs
             .iter()
             .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
             .collect();
