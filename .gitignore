@@ -4,3 +4,5 @@ pallet/target
 build
 .dev/node-template
 .dev/frontend-template
+node_modules
+target
