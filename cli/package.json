@@ -1,0 +1,30 @@
+{
+    "name": "infimum-cli",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+      "build": "tsc",
+      "test": "npm run build && node build/index.js"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "devDependencies": {
+      "@types/node": "^22.8.7",
+      "typescript": "^5.6.3"
+    },
+    "dependencies": {
+      "@polkadot/api": "^15.0.1",
+      "@zk-kit/baby-jubjub": "^1.0.3",
+      "@zk-kit/eddsa-poseidon": "^1.1.0",
+      "@zk-kit/poseidon-cipher": "^0.3.2",
+      "inf-lib": "file:lib/pkg",
+      "ink": "^5.0.1",
+      "maci-core": "^2.4.0",
+      "maci-crypto": "^2.4.0",
+      "maci-domainobjs": "^2.4.0",
+      "react": "^18.3.1"
+    }
+  }
+  
