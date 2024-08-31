@@ -51,7 +51,6 @@ impl Config for Test {
     type MaxVoteOptions = ConstU32<4>;
     type MaxPollRegistrations = ConstU32<4>;
     type MaxPollInteractions = ConstU32<4>;
-    type MaxIterationDepth = ConstU32<4>;
 	type RuntimeEvent = RuntimeEvent;
 }
 

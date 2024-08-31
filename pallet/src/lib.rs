@@ -67,10 +67,6 @@ pub mod pallet
 		/// The maximum allowable number of poll interactions.
 		#[pallet::constant]
 		type MaxPollInteractions: Get<u32>;
-
-		/// The maximal allowable number of iterations in an extrinsic.
-		#[pallet::constant]
-		type MaxIterationDepth: Get<u32>;
 	}
 
 	#[pallet::event]

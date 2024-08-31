@@ -148,9 +148,6 @@ pub trait Config: pallet_infimum::Config
     
     /// The maximum number of polls that any individual coordinator may be responsible for.
     type MaxCoordinatorPolls = ConstU32<1028>;
-    
-    /// The maximal length of a verification key.
-    type MaxVerifyKeyLength = ConstU32<4079>;
 
     /// The maximal number of potential outcomes any one poll may have.  
     type MaxVoteOptions = ConstU32<32>;
@@ -160,12 +157,6 @@ pub trait Config: pallet_infimum::Config
     
     /// The maximal number of registrations any one poll may have.
     type MaxPollInteractions = ConstU32<65536>;
-
-    /// As an optimization technique, registrations and interactions perform some of the work
-    /// of the coordinator ahead of time. This constant permits runtime developers more fine-
-    /// grained control over how much of that work is completed -- however, the tradeoff is 
-    /// that additional storage space is consumed.
-    type MaxIterationDepth = ConstU32<256>;
 }
 ```
 
