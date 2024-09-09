@@ -1,4 +1,4 @@
-use frame_support::pallet_prelude::*;
+// use frame_support::pallet_prelude::*;
 use sp_std::vec;
 use sp_runtime::traits::SaturatedConversion;
 use ark_bn254::{Fr};
@@ -14,7 +14,7 @@ use crate::poll::{
     Poll, 
     PublicKey,
     PollInteractionData,
-    zeroes::EMPTY_BALLOT_ROOT
+    zeroes::EMPTY_BALLOT_ROOTS
 };
 
 pub trait PollProvider<T: crate::Config>: Sized
@@ -184,6 +184,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
             .collect();
 
         let Some(result) = hash4.hash(&inputs).ok() else { Err(MerkleTreeError::HashFailed)? };
+
         let bytes = result.into_bigint().to_bytes_be();
         let mut leaf = [0u8; 32];
         leaf[..bytes.len()].copy_from_slice(&bytes);
@@ -197,12 +198,12 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         mut self
     ) -> Result<Self, MerkleTreeError>
     {
-        self.state.registrations = self.state.registrations.merge()?;
+        self.state.registrations = self.state.registrations.merge(false)?;
 
         let Some(root) = self.state.registrations.root else { Err(MerkleTreeError::MergeFailed)? };
         let Some(mut hasher) = Poseidon::<Fr>::new_circom(3).ok() else { Err(MerkleTreeError::HashFailed)? };
 
-        let inputs: vec::Vec<Fr> = vec::Vec::from([ root, EMPTY_BALLOT_ROOT, [0u8;32] ])
+        let inputs: vec::Vec<Fr> = vec::Vec::from([ root, EMPTY_BALLOT_ROOTS[1], [0u8;32] ])
             .iter()
             .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
             .collect();
@@ -221,7 +222,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         mut self
     ) -> Result<Self, MerkleTreeError>
     {
-        self.state.interactions = self.state.interactions.merge()?;
+        self.state.interactions = self.state.interactions.merge(true)?;
         Ok(self)
     }
 
@@ -232,7 +233,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
 
     fn interaction_limit_reached(&self) -> bool
     {
-        self.state.interactions.count >= T::MaxPollInteractions::get()
+        self.state.interactions.count >= self.config.max_interactions
     }
 
     /// Returns true iff poll is not None and `now` preceeds the end time of the poll.
