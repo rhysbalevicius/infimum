@@ -13,6 +13,7 @@ pub use provider::*;
 pub use keys::*;
 pub use state::{
     PollState,
+    NewPollState,
     AmortizedIncrementalMerkleTree,
     MerkleTreeError
 };
