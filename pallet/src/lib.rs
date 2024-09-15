@@ -369,7 +369,8 @@ pub mod pallet
 			origin: OriginFor<T>,
 			signup_period: BlockNumber,
 			voting_period: BlockNumber,
-			max_registrations: u32,
+			registration_depth: u8,
+			interaction_depth: u8,
 			process_subtree_depth: u32,
 			vote_options: vec::Vec<u128>
 		) -> DispatchResult
@@ -379,8 +380,14 @@ pub mod pallet
 
 			// Validate config parameters.
 			let created_at = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
+			let max_registrations = 2_u32.pow(registration_depth.into());
 			ensure!(
 				max_registrations <= T::MaxPollRegistrations::get(),
+				Error::<T>::PollConfigInvalid
+			);
+			let max_interactions = 5_u32.pow(interaction_depth.into());
+			ensure!(
+				max_interactions <= T::MaxPollInteractions::get(),
 				Error::<T>::PollConfigInvalid
 			);
 
@@ -420,11 +427,15 @@ pub mod pallet
 				index,
 				created_at,
 				coordinator: sender.clone(),
-				state: PollState::default(),
+				state: PollState::new(
+					registration_depth,
+					interaction_depth
+				),
 				config: PollConfiguration {
 					signup_period,
 					voting_period,
 					max_registrations,
+					max_interactions,
 					process_subtree_depth,
 					vote_options
 				}
@@ -436,7 +447,7 @@ pub mod pallet
 
 			// Emit the creation event.
 			let starts_at = created_at + signup_period;
-			let ends_at = starts_at + voting_period;
+			let ends_at = starts_at + voting_period + 1;
 			Self::deposit_event(Event::PollCreated { 
 				coordinator: sender,
 				poll_id: index,
@@ -477,7 +488,7 @@ pub mod pallet
 			{
 				// Ensure that there was at least one registration.
 				ensure!(
-					poll.state.registrations.hashes.len() > 0,
+					poll.state.registrations.count > 0,
 					Error::<T>::PollDataEmpty
 				);
 
@@ -506,7 +517,7 @@ pub mod pallet
 
 				// Ensure that there was at least one interaction.
 				ensure!(
-					poll.state.interactions.hashes.len() > 0,
+					poll.state.interactions.count > 0,
 					Error::<T>::PollDataEmpty
 				);
 
