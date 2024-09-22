@@ -1,9 +1,7 @@
-// use frame_support::pallet_prelude::*;
 use sp_std::vec;
 use sp_runtime::traits::SaturatedConversion;
 use ark_bn254::{Fr};
 use ark_ff::{PrimeField, BigInteger};
-use ark_serialize::{CanonicalDeserialize};
 use crate::hash::{Poseidon, PoseidonHasher};
 use crate::poll::{
     AmortizedIncrementalMerkleTree, 
@@ -98,15 +96,18 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
                 .collect();
             let Some(coord_pub_key_hash) = hasher.hash(&coord_pub_key_fr).ok() else { return inputs; };
             let Some(root_bytes) = self.state.interactions.root else { return inputs; };
-            let Some(interaction_root) = Fr::deserialize_uncompressed(&root_bytes[..]).ok() else { return inputs; };
-            let Some(new_commitment_fr) = Fr::deserialize_uncompressed(&new_commitment[..]).ok() else { return inputs; };
-            let Some(curr_commitment_fr) = Fr::deserialize_uncompressed(&curr_commitment[..]).ok() else { return inputs; };
+            let interaction_root = Fr::from_be_bytes_mod_order(&root_bytes);
+            let new_commitment_fr = Fr::from_be_bytes_mod_order(&new_commitment);
+            let curr_commitment_fr = Fr::from_be_bytes_mod_order(&curr_commitment);
+
+            let mut end_batch_index = current_batch_index + message_batch_size;
+            if end_batch_index > self.state.interactions.count { end_batch_index = self.state.interactions.count; }
             
-            inputs.push(Fr::from(self.state.registrations.count));
+            inputs.push(Fr::from(self.state.registrations.count + 1));
             inputs.push(Fr::from(self.get_voting_period_end()));
             inputs.push(interaction_root);
             inputs.push(Fr::from(self.state.registrations.depth));
-            inputs.push(Fr::from(current_batch_index + message_batch_size));
+            inputs.push(Fr::from(end_batch_index));
             inputs.push(Fr::from(current_batch_index));
             inputs.push(coord_pub_key_hash);
             inputs.push(curr_commitment_fr);
