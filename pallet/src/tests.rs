@@ -371,7 +371,12 @@ fn merge_registration_state()
             vec::Vec::from([ 103, 203, 92, 31, 14, 86, 151, 42, 234, 246, 74, 42, 162, 238, 68, 115, 190, 69, 152, 160, 29, 184, 59, 38, 4, 22, 193, 80, 214, 132, 3, 2, 12, 81, 38, 28, 142, 93, 189, 255, 195, 134, 100, 108, 232, 193, 180, 53, 160, 58, 61, 39, 255, 172, 82, 224, 189, 155, 233, 164, 219, 5, 145, 1 ]),
             vec::Vec::from([ 249, 131, 0, 181, 4, 54, 223, 149, 85, 169, 158, 156, 194, 194, 17, 20, 119, 129, 241, 157, 86, 130, 226, 55, 196, 255, 148, 83, 184, 115, 182, 36, 147, 180, 245, 95, 3, 235, 83, 19, 197, 59, 39, 92, 61, 110, 140, 11, 94, 132, 85, 110, 253, 217, 166, 65, 204, 65, 56, 121, 106, 208, 168, 3 ]),
         ]);
-        let vk = VerifyKey { alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1 };
+        let vk_process = VerifyKey { alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1 };
+        let vk_tally = vk_process.clone(); // Unused in test
+        let vk = VerifyingKeys {
+            process: vk_process.clone(),
+            tally: vk_tally
+        };
         let signup_period = 12;
         let voting_period = 12;
         let registration_depth = 10;
@@ -442,7 +447,12 @@ fn merge_interaction_state()
             vec::Vec::from([ 103, 203, 92, 31, 14, 86, 151, 42, 234, 246, 74, 42, 162, 238, 68, 115, 190, 69, 152, 160, 29, 184, 59, 38, 4, 22, 193, 80, 214, 132, 3, 2, 12, 81, 38, 28, 142, 93, 189, 255, 195, 134, 100, 108, 232, 193, 180, 53, 160, 58, 61, 39, 255, 172, 82, 224, 189, 155, 233, 164, 219, 5, 145, 1 ]),
             vec::Vec::from([ 249, 131, 0, 181, 4, 54, 223, 149, 85, 169, 158, 156, 194, 194, 17, 20, 119, 129, 241, 157, 86, 130, 226, 55, 196, 255, 148, 83, 184, 115, 182, 36, 147, 180, 245, 95, 3, 235, 83, 19, 197, 59, 39, 92, 61, 110, 140, 11, 94, 132, 85, 110, 253, 217, 166, 65, 204, 65, 56, 121, 106, 208, 168, 3 ]),
         ]);
-        let vk = VerifyKey { alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1 };
+        let vk_process = VerifyKey { alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1 };
+        let vk_tally = vk_process.clone(); // Unused in test
+        let vk = VerifyingKeys {
+            process: vk_process.clone(),
+            tally: vk_tally
+        };
         let signup_period = 12;
         let voting_period = 12;
         let registration_depth = 31;
@@ -531,7 +541,13 @@ fn commit_outcome_process_proof_batch()
             vec::Vec::from([ 103, 203, 92, 31, 14, 86, 151, 42, 234, 246, 74, 42, 162, 238, 68, 115, 190, 69, 152, 160, 29, 184, 59, 38, 4, 22, 193, 80, 214, 132, 3, 2, 12, 81, 38, 28, 142, 93, 189, 255, 195, 134, 100, 108, 232, 193, 180, 53, 160, 58, 61, 39, 255, 172, 82, 224, 189, 155, 233, 164, 219, 5, 145, 1 ]),
             vec::Vec::from([ 249, 131, 0, 181, 4, 54, 223, 149, 85, 169, 158, 156, 194, 194, 17, 20, 119, 129, 241, 157, 86, 130, 226, 55, 196, 255, 148, 83, 184, 115, 182, 36, 147, 180, 245, 95, 3, 235, 83, 19, 197, 59, 39, 92, 61, 110, 140, 11, 94, 132, 85, 110, 253, 217, 166, 65, 204, 65, 56, 121, 106, 208, 168, 3 ]),
         ]);
-        let vk = VerifyKey { alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1 };
+        let vk_process = VerifyKey { alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1 };
+        let vk_tally = vk_process.clone(); // Unused in test
+        let vk = VerifyingKeys {
+            process: vk_process.clone(),
+            tally: vk_tally
+        };
+
         let signup_period = 12;
         let voting_period = 12;
         let registration_depth = 31;

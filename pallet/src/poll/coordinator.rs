@@ -12,6 +12,17 @@ pub struct ProofData
     pub pi_c: vec::Vec<u8>
 }
 
+/// A pair of verification keys for message processing and tally verification circuits.
+#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+pub struct VerifyingKeys
+{
+    /// The verifying key for the message processing circuit.
+    pub process: VerifyKey,
+
+    /// The verifying key for the tally circuit.
+    pub tally: VerifyKey
+}
+
 /// Coordinator storage definition.
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 pub struct Coordinator
@@ -20,7 +31,7 @@ pub struct Coordinator
     pub public_key: PublicKey,
 
     /// The coordinators verify key.
-    pub verify_key: VerifyKey,
+    pub verify_key: VerifyingKeys,
 
     /// The coordinators most recent poll (may be active).
     pub last_poll: Option<PollId>

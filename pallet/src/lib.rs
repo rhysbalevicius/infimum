@@ -79,8 +79,8 @@ pub mod pallet
 			who: T::AccountId,
 			/// The public key of the coordinator.
 			public_key: PublicKey,
-			/// The verify key of the coordinator.
-			verify_key: VerifyKey
+			/// The verifying keys of the coordinator.
+			verify_key: VerifyingKeys
 		},
 
 		/// A coordinator rotated one of their keys.
@@ -89,8 +89,8 @@ pub mod pallet
 			who: T::AccountId, 
 			/// The new public key.
 			public_key: PublicKey,
-			/// The new verify key.
-			verify_key: VerifyKey
+			/// The new verifying keys.
+			verify_key: VerifyingKeys
 		},
 
 		/// A participant registered to vote in a poll.
@@ -271,14 +271,15 @@ pub mod pallet
 		pub fn register_as_coordinator(
 			origin: OriginFor<T>,
 			public_key: PublicKey,
-			verify_key: VerifyKey
+			verify_key: VerifyingKeys
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			// Ensure the verification key can be serialized as affine points.
-			ensure!(serialize_vkey(verify_key.clone()).is_some(), Error::<T>::MalformedKeys);
+			// Ensure the verification keys can be serialized as affine points.
+			ensure!(serialize_vkey(verify_key.process.clone()).is_some(), Error::<T>::MalformedKeys);
+			ensure!(serialize_vkey(verify_key.tally.clone()).is_some(), Error::<T>::MalformedKeys);
 
 			// A coordinator may only be registered once.
 			ensure!(
@@ -315,14 +316,15 @@ pub mod pallet
 		pub fn rotate_keys(
 			origin: OriginFor<T>,
 			public_key: PublicKey,
-			verify_key: VerifyKey
+			verify_key: VerifyingKeys
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			// Ensure the verification key can be serialized as affine points.
-			ensure!(serialize_vkey(verify_key.clone()).is_some(), Error::<T>::MalformedKeys);
+			// Ensure the verification keys can be serialized as affine points.
+			ensure!(serialize_vkey(verify_key.process.clone()).is_some(), Error::<T>::MalformedKeys);
+			ensure!(serialize_vkey(verify_key.tally.clone()).is_some(), Error::<T>::MalformedKeys);
 
 			// Check if origin is registered as a coordinator.
 			let Some(mut coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
@@ -580,17 +582,15 @@ pub mod pallet
 			// Verify each batch of proofs, in order.
 			for (proof, new_commitment) in batches.iter()
 			{
+				let (verify_key, public_inputs) = poll.clone().get_proof_public_inputs(
+					index,
+					coordinator.clone(),
+					cur_commitment,
+					*new_commitment
+				);
+
 				ensure!(
-					verify_proof(
-						coordinator.verify_key.clone(),
-						poll.clone().get_proof_public_inputs(
-							index,
-							coordinator.public_key.clone(),
-							cur_commitment,
-							*new_commitment
-						),
-						proof.clone()
-					),
+					verify_proof(verify_key, public_inputs, proof.clone()),
 					Error::<T>::MalformedProof
 				);
 

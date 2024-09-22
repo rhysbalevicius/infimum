@@ -7,10 +7,12 @@ use crate::poll::{
     AmortizedIncrementalMerkleTree, 
     BlockNumber,
     CommitmentIndex,
+    Coordinator,
     HashBytes,
     MerkleTreeError,
     Poll, 
     PublicKey,
+    VerifyKey,
     PollInteractionData,
     zeroes::EMPTY_BALLOT_ROOTS
 };
@@ -20,10 +22,10 @@ pub trait PollProvider<T: crate::Config>: Sized
     fn get_proof_public_inputs(
         self,
         proof_index: CommitmentIndex,
-        coord_pub_key: PublicKey,
+        coordinator: Coordinator,
         curr_commitment: HashBytes,
         new_commitment: HashBytes
-    ) -> vec::Vec<Fr>;
+    ) -> (VerifyKey, vec::Vec<Fr>);
 
     fn register_participant(
         self, 
@@ -67,11 +69,12 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
     fn get_proof_public_inputs(
         self,
         proof_index: CommitmentIndex,
-        coord_pub_key: PublicKey,
+        coordinator: Coordinator,
         curr_commitment: HashBytes,
         new_commitment: HashBytes
-    ) -> vec::Vec<Fr>
+    ) -> (VerifyKey, vec::Vec<Fr>)
     {
+        let verify_key: VerifyKey;
         let mut inputs: vec::Vec<Fr> = vec::Vec::<Fr>::new();
 
         let message_batch_size: u32 = self.state.interactions.arity.pow(self.config.process_subtree_depth).into();
@@ -87,15 +90,17 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         // Return inputs for message processing circuit
         if index_offset <= current_batch_index
         {
+            verify_key = coordinator.verify_key.process;
             current_batch_index -= index_offset;
 
-            let Some(mut hasher) = Poseidon::<Fr>::new_circom(2).ok() else { return inputs; };
+            let Some(mut hasher) = Poseidon::<Fr>::new_circom(2).ok() else { return (verify_key, inputs); };
+            let coord_pub_key = coordinator.public_key.clone();
             let coord_pub_key_fr: vec::Vec<Fr> = vec::Vec::from([ coord_pub_key.x, coord_pub_key.y ])
                 .iter()
                 .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
                 .collect();
-            let Some(coord_pub_key_hash) = hasher.hash(&coord_pub_key_fr).ok() else { return inputs; };
-            let Some(root_bytes) = self.state.interactions.root else { return inputs; };
+            let Some(coord_pub_key_hash) = hasher.hash(&coord_pub_key_fr).ok() else { return (verify_key, inputs); };
+            let Some(root_bytes) = self.state.interactions.root else { return (verify_key, inputs); };
             let interaction_root = Fr::from_be_bytes_mod_order(&root_bytes);
             let new_commitment_fr = Fr::from_be_bytes_mod_order(&new_commitment);
             let curr_commitment_fr = Fr::from_be_bytes_mod_order(&curr_commitment);
@@ -113,14 +118,15 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
             inputs.push(curr_commitment_fr);
             inputs.push(new_commitment_fr);
     
-            inputs
+            (verify_key, inputs)
         }
 
         // Return inputs for tally circuit
         else
         {
             // TODO
-            return inputs;
+            verify_key = coordinator.verify_key.tally;
+            return (verify_key, inputs);
         }
     }
 
