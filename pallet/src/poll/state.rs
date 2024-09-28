@@ -3,12 +3,25 @@ use sp_std::vec;
 use ark_bn254::{Fr};
 use ark_ff::{PrimeField, BigInteger};
 use crate::poll::{
-    Commitment,
     Outcome,
     HashBytes,
+    CommitmentIndex,
+    CommitmentData,
     zeroes::get_merkle_zeroes
 };
 use crate::hash::{Poseidon, PoseidonHasher, PoseidonError};
+
+// pub type Commitment = (CommitmentIndex, CommitmentData);
+
+#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+pub struct Commitment
+{
+    /// The commitment to the message processing circuit. 
+    pub process: (CommitmentIndex, CommitmentData),
+
+    /// The commitment to the tallying circuit.
+    pub tally: (CommitmentIndex, CommitmentData)
+}
 
 #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
 pub struct PollState
@@ -55,7 +68,10 @@ impl NewPollState for PollState
                 interaction_depth,
                 None
             ),
-            commitment: (0, [0; 32]),
+            commitment: Commitment {
+                process: (0, [0; 32]),
+                tally: (0, [0; 32])
+            },
             outcome: None,
             tombstone: false
         }

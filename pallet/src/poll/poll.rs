@@ -6,7 +6,6 @@ use crate::hash::poseidon::{HASH_LEN};
 pub type BlockNumber = u64;
 pub type CommitmentIndex = u32;
 pub type CommitmentData = HashBytes;
-pub type Commitment = (CommitmentIndex, CommitmentData);
 pub type HashBytes = [u8; HASH_LEN];
 pub type Outcome = u128;
 pub type OutcomeIndex = u32;

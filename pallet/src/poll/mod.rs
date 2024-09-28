@@ -15,5 +15,6 @@ pub use state::{
     PollState,
     NewPollState,
     AmortizedIncrementalMerkleTree,
-    MerkleTreeError
+    MerkleTreeError,
+    Commitment
 };

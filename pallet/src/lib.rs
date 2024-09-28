@@ -577,26 +577,24 @@ pub mod pallet
 			//Check that the outcome has not already been committed.
 			ensure!(!poll.is_fulfilled(), Error::<T>::PollOutcomeAlreadyDetermined);
 
-			let (mut index, mut cur_commitment) = poll.state.commitment;
-
-			// Verify each batch of proofs, in order.
+			// Verify each batch of proofs in order.
 			for (proof, new_commitment) in batches.iter()
 			{
-				let (verify_key, public_inputs) = poll.clone().get_proof_public_inputs(
-					index,
+				let Some((
+					verify_key,
+					public_inputs,
+					commitment
+				)) = poll.clone().prepare_public_inputs(
 					coordinator.clone(),
-					cur_commitment,
 					*new_commitment
-				);
+				) else { Err(<Error::<T>>::MalformedProof)? };
 
 				ensure!(
 					verify_proof(verify_key, public_inputs, proof.clone()),
 					Error::<T>::MalformedProof
 				);
 
-				index += 1;
-				cur_commitment = *new_commitment;
-				poll.state.commitment = (index, cur_commitment);
+				poll.state.commitment = commitment;
 			}
 
 			// Once the final batch is verified, check that the outcome matches the final commitment.
@@ -613,7 +611,7 @@ pub mod pallet
 			{
 				Self::deposit_event(Event::PollCommitmentUpdated {
 					poll_id,
-					commitment: (index, cur_commitment)
+					commitment: poll.clone().state.commitment
 				})
 			}
 			else { Err(<Error::<T>>::MalformedProof)? }
