@@ -6,7 +6,7 @@ use crate::hash::{Poseidon, PoseidonHasher};
 use crate::poll::{
     AmortizedIncrementalMerkleTree, 
     BlockNumber,
-    CommitmentIndex,
+    Commitment,
     Coordinator,
     HashBytes,
     MerkleTreeError,
@@ -19,13 +19,11 @@ use crate::poll::{
 
 pub trait PollProvider<T: crate::Config>: Sized
 {
-    fn get_proof_public_inputs(
+    fn prepare_public_inputs(
         self,
-        proof_index: CommitmentIndex,
         coordinator: Coordinator,
-        curr_commitment: HashBytes,
         new_commitment: HashBytes
-    ) -> (VerifyKey, vec::Vec<Fr>);
+    ) -> Option<(VerifyKey, vec::Vec<Fr>, Commitment)>;
 
     fn register_participant(
         self, 
@@ -66,13 +64,11 @@ pub trait PollProvider<T: crate::Config>: Sized
 
 impl<T: crate::Config> PollProvider<T> for Poll<T>
 {
-    fn get_proof_public_inputs(
+    fn prepare_public_inputs(
         self,
-        proof_index: CommitmentIndex,
         coordinator: Coordinator,
-        curr_commitment: HashBytes,
         new_commitment: HashBytes
-    ) -> (VerifyKey, vec::Vec<Fr>)
+    ) -> Option<(VerifyKey, vec::Vec<Fr>, Commitment)>
     {
         let verify_key: VerifyKey;
         let mut inputs: vec::Vec<Fr> = vec::Vec::<Fr>::new();
@@ -85,48 +81,63 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
             if r == 0 { current_batch_index -= message_batch_size; }
             else { current_batch_index -= r; }
         }
+        let mut proof_index = self.state.commitment.process.0;
         let index_offset = proof_index * message_batch_size;
 
         // Return inputs for message processing circuit
         if index_offset <= current_batch_index
         {
             verify_key = coordinator.verify_key.process;
-            current_batch_index -= index_offset;
 
-            let Some(mut hasher) = Poseidon::<Fr>::new_circom(2).ok() else { return (verify_key, inputs); };
+            let Some(mut hasher) = Poseidon::<Fr>::new_circom(2).ok() else { return None; };
             let coord_pub_key = coordinator.public_key.clone();
             let coord_pub_key_fr: vec::Vec<Fr> = vec::Vec::from([ coord_pub_key.x, coord_pub_key.y ])
                 .iter()
                 .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
                 .collect();
-            let Some(coord_pub_key_hash) = hasher.hash(&coord_pub_key_fr).ok() else { return (verify_key, inputs); };
-            let Some(root_bytes) = self.state.interactions.root else { return (verify_key, inputs); };
-            let interaction_root = Fr::from_be_bytes_mod_order(&root_bytes);
-            let new_commitment_fr = Fr::from_be_bytes_mod_order(&new_commitment);
-            let curr_commitment_fr = Fr::from_be_bytes_mod_order(&curr_commitment);
+            let Some(coord_pub_key_hash) = hasher.hash(&coord_pub_key_fr).ok() else { return None; };
+            let Some(root_bytes) = self.state.interactions.root else { return None; };
 
+            current_batch_index -= index_offset;
             let mut end_batch_index = current_batch_index + message_batch_size;
             if end_batch_index > self.state.interactions.count { end_batch_index = self.state.interactions.count; }
             
             inputs.push(Fr::from(self.state.registrations.count + 1));
             inputs.push(Fr::from(self.get_voting_period_end()));
-            inputs.push(interaction_root);
+            inputs.push(Fr::from_be_bytes_mod_order(&root_bytes));
             inputs.push(Fr::from(self.state.registrations.depth));
             inputs.push(Fr::from(end_batch_index));
             inputs.push(Fr::from(current_batch_index));
             inputs.push(coord_pub_key_hash);
-            inputs.push(curr_commitment_fr);
-            inputs.push(new_commitment_fr);
+            inputs.push(Fr::from_be_bytes_mod_order(&self.state.commitment.process.1));
+            inputs.push(Fr::from_be_bytes_mod_order(&new_commitment));
+
+            let mut commitment = self.state.commitment.clone();
+            commitment.process = (proof_index + 1, new_commitment);
     
-            (verify_key, inputs)
+            Some((verify_key, inputs, commitment))
         }
 
         // Return inputs for tally circuit
         else
         {
-            // TODO
+            proof_index = self.state.commitment.tally.0;
             verify_key = coordinator.verify_key.tally;
-            return (verify_key, inputs);
+
+            let batch_size: u32 = self.state.registrations.arity.pow(self.config.process_subtree_depth).into();
+            let current_batch_index = proof_index * batch_size;
+            if current_batch_index >= self.state.registrations.count + 1 { return None; }
+
+            inputs.push(Fr::from_be_bytes_mod_order(&self.state.commitment.process.1));
+            inputs.push(Fr::from_be_bytes_mod_order(&self.state.commitment.tally.1));
+            inputs.push(Fr::from_be_bytes_mod_order(&new_commitment));
+            inputs.push(Fr::from(current_batch_index));
+            inputs.push(Fr::from(self.state.registrations.count + 1));
+
+            let mut commitment = self.state.commitment.clone();
+            commitment.tally = (proof_index + 1, new_commitment);
+
+            Some((verify_key, inputs, commitment))
         }
     }
 
@@ -220,7 +231,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         let mut commitment = [0u8; 32];
         commitment[..bytes.len()].copy_from_slice(&bytes);
 
-        self.state.commitment = (0, commitment);
+        self.state.commitment.process = (0, commitment);
 
         Ok(self)
     }
