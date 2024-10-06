@@ -33,3 +33,31 @@ pub struct Poll<T: crate::Config>
     /// The poll config.
     pub config: PollConfiguration<T>
 }
+
+#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+pub struct PollOutcome
+{
+    /// The indices of the vote options.
+    pub vote_option_indices: vec::Vec<u32>,
+
+    /// The results of the tally per option.
+    pub tally_results: vec::Vec<u32>,
+
+    /// The proof of correctness for the results.
+    pub tally_result_proofs: vec::Vec<vec::Vec<vec::Vec<u32>>>,
+
+    /// The total number of votes casted.
+    pub total_spent: u32,
+
+    /// The salt for the total votes.
+    pub total_spent_salt: u32,
+
+    /// The salt for the tally results.
+    pub tally_result_salt: u32,
+
+    /// The salted commitment of the vote tally.
+    pub new_results_commitment: HashBytes,
+
+    /// The hash of the spent votes and salt.
+    pub spent_votes_hash: HashBytes
+}

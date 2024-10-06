@@ -151,8 +151,8 @@ pub mod pallet
 		PollOutcome {
 			/// The poll index.
 			poll_id: PollId,
-			/// The outcome of the poll.
-			outcome: u128
+			/// The outcome index of the poll.
+			outcome_index: u32
 		},
 
 		/// Empty and expired poll was nullified.
@@ -560,7 +560,7 @@ pub mod pallet
 		pub fn commit_outcome(
 			origin: OriginFor<T>,
 			batches: ProofBatches,
-			outcome: Option<OutcomeIndex>
+			outcome: Option<PollOutcome>
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
@@ -574,8 +574,11 @@ pub mod pallet
 			// Check that the state trees have been merged 
 			ensure!(poll.is_merged(), Error::<T>::PollStateNotMerged);
 
-			//Check that the outcome has not already been committed.
+			// Check that the outcome has not already been committed.
 			ensure!(!poll.is_fulfilled(), Error::<T>::PollOutcomeAlreadyDetermined);
+
+			// Ensure at least one of the inputs have been provided.
+			ensure!(batches.len() > 0 || outcome.is_some(), Error::<T>::MalformedProof);
 
 			// Verify each batch of proofs in order.
 			for (proof, new_commitment) in batches.iter()
@@ -597,24 +600,25 @@ pub mod pallet
 				poll.state.commitment = commitment;
 			}
 
-			// Once the final batch is verified, check that the outcome matches the final commitment.
-			if let Some(outcome) = verify_outcome(poll.clone(), outcome)
-			{
-				poll.state.outcome = Some(outcome);
-
-				Self::deposit_event(Event::PollOutcome { 
-					poll_id,
-					outcome
-				});
-			}
-			else if batches.len() > 0
+			// Publish the commitment from the final batch.
+			if batches.len() > 0
 			{
 				Self::deposit_event(Event::PollCommitmentUpdated {
 					poll_id,
 					commitment: poll.clone().state.commitment
 				})
 			}
-			else { Err(<Error::<T>>::MalformedProof)? }
+
+			// Once the final proof batch is verified, verify that the outcome matches the final commitment.
+			if let Some(outcome_index) = poll.clone().verify_outcome(outcome)
+			{
+				poll.state.outcome = Some(outcome_index);
+
+				Self::deposit_event(Event::PollOutcome { 
+					poll_id,
+					outcome_index
+				});
+			}
 
 			// Update the poll state.
 			Polls::<T>::insert(poll_id, poll);
@@ -809,19 +813,5 @@ pub mod pallet
 		let Some(result) = Groth16::<Bn254>::verify_with_processed_vk(&pvk, &public_inputs, &proof).ok() else { return false; };
 
 		result
-	}
-
-	fn verify_outcome<T: Config>(
-		poll_data: Poll<T>,
-		index: Option<OutcomeIndex>
-	) -> Option<Outcome>
-	{
-		let Some(index) = index else { return None };
-		if (index as usize) < poll_data.config.vote_options.len()
-		{
-			return Some(poll_data.config.vote_options[index as usize]);
-		}
-
-		None
 	}
 }

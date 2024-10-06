@@ -3,7 +3,7 @@ use sp_std::vec;
 use ark_bn254::{Fr};
 use ark_ff::{PrimeField, BigInteger};
 use crate::poll::{
-    Outcome,
+    OutcomeIndex,
     HashBytes,
     CommitmentIndex,
     CommitmentData,
@@ -36,7 +36,7 @@ pub struct PollState
     pub commitment: Commitment,
 
     /// The final result of the poll.
-    pub outcome: Option<Outcome>,
+    pub outcome: Option<OutcomeIndex>,
 
     /// Whether the poll was nullified
     pub tombstone: bool

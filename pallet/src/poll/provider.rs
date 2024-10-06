@@ -10,15 +10,22 @@ use crate::poll::{
     Coordinator,
     HashBytes,
     MerkleTreeError,
+    OutcomeIndex,
+    PollOutcome,
     Poll, 
     PublicKey,
-    VerifyKey,
     PollInteractionData,
+    VerifyKey,
     zeroes::EMPTY_BALLOT_ROOTS
 };
 
 pub trait PollProvider<T: crate::Config>: Sized
 {
+    fn verify_outcome(
+        self,
+        oucome: Option<PollOutcome>
+    ) -> Option<OutcomeIndex>;
+
     fn prepare_public_inputs(
         self,
         coordinator: Coordinator,
@@ -64,6 +71,16 @@ pub trait PollProvider<T: crate::Config>: Sized
 
 impl<T: crate::Config> PollProvider<T> for Poll<T>
 {
+    fn verify_outcome(
+        self,
+        outcome: Option<PollOutcome>
+    ) -> Option<OutcomeIndex>
+    {
+        let Some(_outcome) = outcome else { return None; };
+
+        Some(0)
+    }
+
     fn prepare_public_inputs(
         self,
         coordinator: Coordinator,
