@@ -19,7 +19,10 @@ pub struct PollConfiguration<T: crate::Config>
     pub max_interactions: u32,
 
     /// The subtree depth to process per commitment.
-    pub process_subtree_depth: u32,
+    pub process_subtree_depth: u8,
+
+    /// The vote option tree depth.
+    pub vote_option_tree_depth: u8,
 
     /// The possible outcomes of the poll.
     pub vote_options: VoteOptions<T>,

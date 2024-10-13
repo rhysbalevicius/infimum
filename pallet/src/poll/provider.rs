@@ -76,9 +76,61 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         outcome: Option<PollOutcome>
     ) -> Option<OutcomeIndex>
     {
-        let Some(_outcome) = outcome else { return None; };
+        let Some(outcome) = outcome else { return None; };
+        let Some(mut hasher) = Poseidon::<Fr>::new_circom(2).ok() else { return None; };
+        
+        let mut outcome_index: OutcomeIndex = 0;
+        let mut max_tally_result = 0;
 
-        Some(0)
+        // Verify the tally result for each individual vote option.
+        for option_index in 0..self.config.vote_options.len()
+        {
+            let Some(tally_result) = outcome.tally_results.get(option_index) else { return None; };
+            let Some(tally_path) = outcome.tally_result_proofs.get(option_index) else { return None; };
+            let mut tally_result_bytes = [0u8; 32];
+            tally_result_bytes[28..].copy_from_slice(&tally_result.to_be_bytes());
+
+            let Some(root) = compute_merkle_root_from_path(
+                self.config.vote_option_tree_depth,
+                option_index as u32,
+                tally_result_bytes,
+                tally_path.clone()
+            ) else { return None; };
+
+            let mut inputs: vec::Vec<Fr> = vec::Vec::<Fr>::new();
+            inputs.push(Fr::from_be_bytes_mod_order(&root));
+            inputs.push(Fr::from_be_bytes_mod_order(&outcome.tally_result_salt));
+            let Some(hash) = hasher.hash(&inputs).ok() else { return None; };
+
+            let mut inputs: vec::Vec<Fr> = vec::Vec::<Fr>::new();
+            inputs.push(Fr::from_be_bytes_mod_order(&hash.into_bigint().to_bytes_be()));
+            inputs.push(Fr::from_be_bytes_mod_order(&outcome.spent_votes_hash));
+            let Some(hash) = hasher.hash(&inputs).ok() else { return None; };
+
+            if hash.into_bigint().to_bytes_be() != self.state.commitment.tally.1 { return None; }
+
+            // Track the vote option with the largest tally.
+            if *tally_result > max_tally_result
+            {
+                outcome_index = option_index as OutcomeIndex;
+                max_tally_result = *tally_result;
+            }
+        }
+
+        // Verify the total number of votes cast.
+        let mut inputs: vec::Vec<Fr> = vec::Vec::<Fr>::new();
+        inputs.push(Fr::from_be_bytes_mod_order(&outcome.total_spent));
+        inputs.push(Fr::from_be_bytes_mod_order(&outcome.total_spent_salt));
+        let Some(hash) = hasher.hash(&inputs).ok() else { return None; };
+
+        let mut inputs: vec::Vec<Fr> = vec::Vec::<Fr>::new();
+        inputs.push(Fr::from_be_bytes_mod_order(&outcome.new_results_commitment));
+        inputs.push(Fr::from_be_bytes_mod_order(&hash.into_bigint().to_bytes_be()));
+        let Some(hash) = hasher.hash(&inputs).ok() else { return None; };
+
+        if hash.into_bigint().to_bytes_be() != self.state.commitment.tally.1 { return None; }
+
+        Some(outcome_index)
     }
 
     fn prepare_public_inputs(
@@ -90,7 +142,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         let verify_key: VerifyKey;
         let mut inputs: vec::Vec<Fr> = vec::Vec::<Fr>::new();
 
-        let message_batch_size: u32 = self.state.interactions.arity.pow(self.config.process_subtree_depth).into();
+        let message_batch_size: u32 = self.state.interactions.arity.pow(self.config.process_subtree_depth.into()).into();
         let mut current_batch_index = self.state.interactions.count;
         if current_batch_index > 0
         {
@@ -141,7 +193,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
             proof_index = self.state.commitment.tally.0;
             verify_key = coordinator.verify_key.tally;
 
-            let batch_size: u32 = self.state.registrations.arity.pow(self.config.process_subtree_depth).into();
+            let batch_size: u32 = self.state.registrations.arity.pow(self.config.process_subtree_depth.into()).into();
             let current_batch_index = proof_index * batch_size;
             if current_batch_index >= self.state.registrations.count + 1 { return None; }
 
@@ -349,9 +401,6 @@ fn compute_merkle_root_from_path(
             }
         }
 
-        idx /= VOTE_TREE_ARITY;
-        position = idx % VOTE_TREE_ARITY;
-
         let inputs: vec::Vec<Fr> = vec::Vec::from(&level)
             .iter()
             .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
@@ -360,6 +409,9 @@ fn compute_merkle_root_from_path(
         let bytes = result.into_bigint().to_bytes_be();
         let mut leaf = [0u8; 32];
         leaf[..bytes.len()].copy_from_slice(&bytes);
+
+        idx /= VOTE_TREE_ARITY;
+        position = idx % VOTE_TREE_ARITY;
         current = leaf;
     }
 
