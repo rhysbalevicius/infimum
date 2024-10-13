@@ -321,3 +321,47 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         self
     }
 }
+
+fn compute_merkle_root_from_path(
+    depth: u8,
+    index: u32,
+    leaf: HashBytes,
+    path: vec::Vec<vec::Vec<HashBytes>>
+) -> Option<HashBytes>
+{
+    const VOTE_TREE_ARITY: u32 = 5;
+    let Some(mut hasher) = Poseidon::<Fr>::new_circom(VOTE_TREE_ARITY as usize).ok() else { return None; };
+
+    let mut idx = index;
+    let mut position = idx % (VOTE_TREE_ARITY);
+    let mut level = [[0u8; 32]; VOTE_TREE_ARITY as usize];
+    let mut current = leaf;
+
+    for i in 0..depth
+    {
+        for j in 0..VOTE_TREE_ARITY
+        {
+            if j == position { level[j as usize] = current; }
+            else
+            {
+                let k = if j > position { j - 1 } else { j };
+                level[j as usize] = path[i as usize][k as usize];
+            }
+        }
+
+        idx /= VOTE_TREE_ARITY;
+        position = idx % VOTE_TREE_ARITY;
+
+        let inputs: vec::Vec<Fr> = vec::Vec::from(&level)
+            .iter()
+            .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
+            .collect();
+        let Some(result) = hasher.hash(&inputs).ok() else { return None; };
+        let bytes = result.into_bigint().to_bytes_be();
+        let mut leaf = [0u8; 32];
+        leaf[..bytes.len()].copy_from_slice(&bytes);
+        current = leaf;
+    }
+
+    Some(current)
+}
