@@ -373,7 +373,9 @@ pub mod pallet
 			voting_period: BlockNumber,
 			registration_depth: u8,
 			interaction_depth: u8,
-			process_subtree_depth: u32,
+			process_subtree_depth: u8,
+			tally_subtree_depth: u8,
+			vote_option_tree_depth: u8,
 			vote_options: vec::Vec<u128>
 		) -> DispatchResult
 		{
@@ -439,6 +441,8 @@ pub mod pallet
 					max_registrations,
 					max_interactions,
 					process_subtree_depth,
+					tally_subtree_depth,
+					vote_option_tree_depth,
 					vote_options
 				}
 			});

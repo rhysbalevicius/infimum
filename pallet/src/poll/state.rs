@@ -57,7 +57,9 @@ impl NewPollState for PollState
             ),
             commitment: Commitment {
                 process: (0, [0; 32]),
-                tally: (0, [0; 32])
+                tally: (0, [0; 32]),
+                expected_process: 0,
+                expected_tally: 0
             },
             outcome: None,
             tombstone: false

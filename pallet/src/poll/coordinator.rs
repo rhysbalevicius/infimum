@@ -31,7 +31,13 @@ pub struct Commitment
     pub process: (CommitmentIndex, CommitmentData),
 
     /// The commitment to the tallying circuit.
-    pub tally: (CommitmentIndex, CommitmentData)
+    pub tally: (CommitmentIndex, CommitmentData),
+
+    /// The expected number of process commitments.
+    pub expected_process: CommitmentIndex,
+
+    /// The expected number of tally commitments.
+    pub expected_tally: CommitmentIndex
 }
 
 /// A serialized groth16 proof.

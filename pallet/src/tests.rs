@@ -382,6 +382,7 @@ fn merge_registration_state()
         let registration_depth = 10;
         let interaction_depth = 2;
         let process_subtree_depth = 1;
+        let tally_subtree_depth = 1;
         let vote_option_tree_depth = 2;
         let vote_options = vec![ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 ];
         
@@ -394,6 +395,7 @@ fn merge_registration_state()
                 registration_depth,
                 interaction_depth,
                 process_subtree_depth,
+                tally_subtree_depth,
                 vote_option_tree_depth,
                 vote_options
             )
@@ -470,6 +472,7 @@ fn merge_interaction_state()
         let registration_depth = 31;
         let interaction_depth = 2;
         let process_subtree_depth = 1;
+        let tally_subtree_depth = 1;
         let vote_option_tree_depth = 2;
         let vote_options = vec![ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 ];
         
@@ -482,6 +485,7 @@ fn merge_interaction_state()
                 registration_depth,
                 interaction_depth,
                 process_subtree_depth,
+                tally_subtree_depth,
                 vote_option_tree_depth,
                 vote_options
             )
@@ -577,6 +581,7 @@ fn commit_outcome_single_batch()
         let registration_depth = 31;
         let interaction_depth = 2;
         let process_subtree_depth = 1;
+        let tally_subtree_depth = 1;
         let vote_option_tree_depth = 2;
         let vote_options = vec![ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 ];
         
@@ -589,6 +594,7 @@ fn commit_outcome_single_batch()
                 registration_depth,
                 interaction_depth,
                 process_subtree_depth,
+                tally_subtree_depth,
                 vote_option_tree_depth,
                 vote_options
             )
@@ -743,6 +749,7 @@ fn commit_outcome_full_batch()
         let registration_depth = 31;
         let interaction_depth = 2;
         let process_subtree_depth = 1;
+        let tally_subtree_depth = 1;
         let vote_option_tree_depth = 2;
         let vote_options = vec![ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 ];
         
@@ -755,6 +762,7 @@ fn commit_outcome_full_batch()
                 registration_depth,
                 interaction_depth,
                 process_subtree_depth,
+                tally_subtree_depth,
                 vote_option_tree_depth,
                 vote_options
             )
@@ -887,6 +895,7 @@ fn commit_outcome()
         let registration_depth = 31;
         let interaction_depth = 2;
         let process_subtree_depth = 1;
+        let tally_subtree_depth = 1;
         let vote_option_tree_depth = 2;
         let vote_options = vec![ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 ];
         
@@ -899,6 +908,7 @@ fn commit_outcome()
                 registration_depth,
                 interaction_depth,
                 process_subtree_depth,
+                tally_subtree_depth,
                 vote_option_tree_depth,
                 vote_options
             )

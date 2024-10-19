@@ -64,6 +64,8 @@ pub trait PollProvider<T: crate::Config>: Sized
 
     fn is_merged(&self) -> bool;
 
+    fn is_proven(&self) -> bool;
+
     fn is_nullified(&self) -> bool;
 
     fn nullify(self) -> Self;
@@ -76,6 +78,9 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         outcome: Option<PollOutcome>
     ) -> Option<OutcomeIndex>
     {
+        // Ensure that all of the expected proofs have been successfully verified.
+        if !self.is_proven() { return None; }
+
         let Some(outcome) = outcome else { return None; };
         let Some(mut hasher) = Poseidon::<Fr>::new_circom(2).ok() else { return None; };
         
@@ -193,7 +198,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
             proof_index = self.state.commitment.tally.0;
             verify_key = coordinator.verify_key.tally;
 
-            let batch_size: u32 = self.state.registrations.arity.pow(self.config.process_subtree_depth.into()).into();
+            let batch_size: u32 = self.state.registrations.arity.pow(self.config.tally_subtree_depth.into()).into();
             let current_batch_index = proof_index * batch_size;
             if current_batch_index >= self.state.registrations.count + 1 { return None; }
 
@@ -310,6 +315,15 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
     ) -> Result<Self, MerkleTreeError>
     {
         self.state.interactions = self.state.interactions.merge(true)?;
+
+        let process_batch_size: u32 = self.state.interactions.arity.pow(self.config.process_subtree_depth.into()).into();
+        let process_extra_batch = if (self.state.interactions.count % process_batch_size) > 0 { 1 } else { 0 };
+        self.state.commitment.expected_process = (self.state.interactions.count / process_batch_size) + process_extra_batch;
+
+        let tally_batch_size: u32 = self.state.registrations.arity.pow(self.config.tally_subtree_depth.into()).into();
+        let tally_extra_batch = if (self.state.registrations.count - 1) % tally_batch_size > 0 { 1 } else { 0 };
+        self.state.commitment.expected_tally = (self.state.registrations.count - 1) / tally_batch_size + tally_extra_batch;
+
         Ok(self)
     }
 
@@ -360,6 +374,12 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
     fn is_merged(&self) -> bool
     {
         self.state.registrations.root.is_some() && self.state.interactions.root.is_some()
+    }
+
+    fn is_proven(&self) -> bool
+    {
+        (self.state.commitment.process.0 == self.state.commitment.expected_process) && 
+            (self.state.commitment.process.0 == self.state.commitment.expected_tally)
     }
 
     fn is_nullified(&self) -> bool

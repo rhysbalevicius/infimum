@@ -21,6 +21,9 @@ pub struct PollConfiguration<T: crate::Config>
     /// The subtree depth to process per commitment.
     pub process_subtree_depth: u8,
 
+    // The intermediate tally subtree depth.
+    pub tally_subtree_depth: u8,
+
     /// The vote option tree depth.
     pub vote_option_tree_depth: u8,
 
