@@ -421,10 +421,8 @@ fn compute_merkle_root_from_path(
             }
         }
 
-        let inputs: vec::Vec<Fr> = vec::Vec::from(&level)
-            .iter()
-            .map(|bytes| Fr::from_be_bytes_mod_order(bytes))
-            .collect();
+        let mut inputs: vec::Vec<Fr> = vec::Vec::new();
+        for l in 0..VOTE_TREE_ARITY { inputs.push(Fr::from_be_bytes_mod_order(&level[l as usize])); }
         let Some(result) = hasher.hash(&inputs).ok() else { return None; };
         let bytes = result.into_bigint().to_bytes_be();
         let mut leaf = [0u8; 32];
