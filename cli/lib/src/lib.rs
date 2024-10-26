@@ -69,7 +69,7 @@ pub struct VerifyingKeyBigNumber
     pub vk_beta_2: [[String; 2]; 3],
     pub vk_gamma_2: [[String; 2]; 3],
     pub vk_delta_2: [[String; 2]; 3],
-    pub ic: [[String; 3]; 2],
+    pub ic: Vec<[String; 3]>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -123,12 +123,11 @@ fn g1_bn_to_bytes(els: [String; 3]) -> Vec<u8>
     serialize_point_to_bytes(&g1)
 }
 
-fn g1_bn_vec_to_bytes(els: [[String; 3]; 2]) -> Vec<Vec<u8>>
+fn g1_bn_vec_to_bytes(els: Vec<[String; 3]>) -> Vec<Vec<u8>> 
 {
-    vec![
-        g1_bn_to_bytes(els[0].clone()),
-        g1_bn_to_bytes(els[1].clone())
-    ]
+    els.into_iter()
+        .map(g1_bn_to_bytes)
+        .collect()
 }
 
 fn g2_bn_to_bytes(els: [[String; 2]; 3]) -> Vec<u8>
