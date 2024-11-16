@@ -321,8 +321,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
         self.state.commitment.expected_process = (self.state.interactions.count / process_batch_size) + process_extra_batch;
 
         let tally_batch_size: u32 = self.state.registrations.arity.pow(self.config.tally_subtree_depth.into()).into();
-        let tally_extra_batch = if (self.state.registrations.count - 1) % tally_batch_size > 0 { 1 } else { 0 };
-        self.state.commitment.expected_tally = (self.state.registrations.count - 1) / tally_batch_size + tally_extra_batch;
+        self.state.commitment.expected_tally = 1 + (self.state.registrations.count / tally_batch_size);
 
         Ok(self)
     }
