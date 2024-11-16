@@ -4,9 +4,10 @@
 mkdir -p build
 ```
 
-## Compiling the circuit
+## Compiling the circuits
 ```
-circom ./circom/poseidon-preimage.circom --r1cs --wasm --sym -o build
+circom ./main-process.circom --r1cs --wasm --sym -o build
+circom ./main-tally.circom --r1cs --wasm --sym -o build
 ```
 
 ## Trusted setup
@@ -21,10 +22,12 @@ snarkjs powersoftau contribute ./build/pot12_0000.ptau ./build/pot12_0001.ptau -
 snarkjs powersoftau prepare phase2 ./build/pot12_0001.ptau ./build/pot12_final.ptau -v
 
 # Generate the Zero-Knowledge Proof Keys
-snarkjs groth16 setup ./build/poseidon-preimage.r1cs ./build/pot12_final.ptau ./build/poseidon-preimage.zkey
+snarkjs groth16 setup ./build/main-process.r1cs ./build/pot12_final.ptau ./build/process.zkey
+snarkjs groth16 setup ./build/main-tally.r1cs ./build/pot12_final.ptau ./build/tally.zkey
 
 # Export the Verification Key
-snarkjs zkey export verificationkey ./build/poseidon-preimage.zkey ./build/verification-key.json
+snarkjs zkey export verificationkey ./build/process.zkey ./build/vk-process.json
+snarkjs zkey export verificationkey ./build/tally.zkey ./build/vk-tally.json
 ```
 
 ## Prepare the input.json
@@ -38,10 +41,18 @@ For example:
 
 ## Generate the witness.wtns
 ```
-node ./build/poseidon-preimage_js/generate_witness.js ./build/poseidon-preimage_js/poseidon-preimage.wasm ./build/input.json ./build/witness.wtns
+node ./build/main-process_js/generate_witness.js ./build/main-process_js/main-process.wasm ./build/input-process.json ./build/witness-process.wtns
+node ./build/main-tally_js/generate_witness.js ./build/main-tally_js/main-tally.wasm ./build/input-tally.json ./build/witness-tally.wtns
 ```
 
 ## Generate the Groth16 proof 
 ```
-snarkjs groth16 prove ./build/poseidon-preimage.zkey ./build/witness.wtns ./build/proof.json ./build/public.json
+snarkjs groth16 prove ./build/process.zkey ./build/witness-process.wtns ./build/proof-process.json ./build/public-process.json
+snarkjs groth16 prove ./build/tally.zkey ./build/witness-tally.wtns ./build/proof-tally.json ./build/public-tally.json
+```
+
+## Verify the proof
+```
+snarkjs groth16 verify ./build/vk-process.json ./build/public-process.json ./build/proof-process.json
+snarkjs groth16 verify ./build/vk-tally.json ./build/public-tally.json ./build/proof-tally.json
 ```
