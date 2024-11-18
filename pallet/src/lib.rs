@@ -224,6 +224,9 @@ pub mod pallet
 
 		/// A proof was rejected.
 		MalformedProof,
+
+		/// The extrinsic arguments are insufficient.
+		MalformedInput
 	}
 
 	/// Map of ids to polls.
@@ -582,7 +585,7 @@ pub mod pallet
 			ensure!(!poll.is_fulfilled(), Error::<T>::PollOutcomeAlreadyDetermined);
 
 			// Ensure at least one of the inputs have been provided.
-			ensure!(batches.len() > 0 || outcome.is_some(), Error::<T>::MalformedProof);
+			ensure!(batches.len() > 0 || outcome.is_some(), Error::<T>::MalformedInput);
 
 			// Verify each batch of proofs in order.
 			for (proof, new_commitment) in batches.iter()
@@ -654,6 +657,10 @@ pub mod pallet
 				(poll.is_over() && poll.state.interactions.count == 0),
 				Error::<T>::PollCurrentlyActive
 			);
+
+			Self::deposit_event(Event::PollNullified {
+				poll_id
+			});
 
 			// Mark the poll as dead.
 			Polls::<T>::insert(poll_id, poll.nullify());
