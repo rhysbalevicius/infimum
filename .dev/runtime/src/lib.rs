@@ -274,7 +274,6 @@ impl pallet_infimum::Config for Runtime {
 	type MaxVoteOptions = ConstU32<32>;
 	type MaxPollRegistrations = ConstU32<65536>;
 	type MaxPollInteractions = ConstU32<65536>;
-	type MaxIterationDepth = ConstU32<256>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
