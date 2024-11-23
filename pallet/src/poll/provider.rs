@@ -328,7 +328,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
 
     fn registration_limit_reached(&self) -> bool
     {
-        self.state.registrations.count >= self.config.max_registrations
+        self.state.registrations.count >= self.config.max_registrations - 1
     }
 
     fn interaction_limit_reached(&self) -> bool
