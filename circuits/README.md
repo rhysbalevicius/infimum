@@ -1,4 +1,4 @@
-# circuits
+# infimum-circuits
 
 ```
 mkdir -p build
