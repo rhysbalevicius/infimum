@@ -378,7 +378,7 @@ impl<T: crate::Config> PollProvider<T> for Poll<T>
     fn is_proven(&self) -> bool
     {
         (self.state.commitment.process.0 == self.state.commitment.expected_process) && 
-            (self.state.commitment.process.0 == self.state.commitment.expected_tally)
+            (self.state.commitment.tally.0 == self.state.commitment.expected_tally)
     }
 
     fn is_nullified(&self) -> bool
