@@ -14,7 +14,7 @@ use crate::hash::{
 
 /// Check the hash of `1` as a prime field element.
 #[test]
-fn poseidon_fr_one()
+fn fr_one()
 {
     let mut hasher = Poseidon::<Fr>::new_circom(2).unwrap();
 
@@ -41,7 +41,7 @@ fn poseidon_fr_one()
 
 /// Checks the hash of byte slices consistng of ones and twos.
 #[test]
-fn poseidon_bytes_ones_twos()
+fn bytes_ones_twos()
 {
     let input1 = Fr::from_be_bytes_mod_order(&[1u8; 32]);
     let input2 = Fr::from_be_bytes_mod_order(&[2u8; 32]);
@@ -76,7 +76,7 @@ fn poseidon_bytes_ones_twos()
 
 /// Checks the hash of bytes slices consisting of ones and twos, with a custom domain tag.
 #[test]
-fn test_poseidon_with_domain_tag()
+fn with_domain_tag()
 {
     let input1 = Fr::from_be_bytes_mod_order(&[1u8; 32]);
     let input2 = Fr::from_be_bytes_mod_order(&[2u8; 32]);
@@ -98,7 +98,7 @@ fn test_poseidon_with_domain_tag()
 
 /// Check the hash of one and two.
 #[test]
-fn test_poseidon_fr_one_two()
+fn fr_one_two()
 {
     let input1 = Fr::from_be_bytes_mod_order(&[1]);
     let input2 = Fr::from_be_bytes_mod_order(&[2]);
@@ -116,7 +116,7 @@ fn test_poseidon_fr_one_two()
 }
 
 #[test]
-fn test_poseidon_random_input()
+fn random_input()
 {
     let input1 = Fr::from_be_bytes_mod_order(&[ 93, 202, 70, 122, 46, 238, 242, 161, 142, 171, 237, 131, 78, 254, 47, 96, 170, 173, 24, 112, 8, 112, 73, 123, 248, 7, 9, 75, 55, 214, 196, 114 ]);
     let input2 = Fr::from_be_bytes_mod_order(&[ 131, 162, 129, 115, 20, 245, 254, 5, 200, 101, 156, 226, 102, 57, 207, 152, 105, 122, 29, 235, 131, 196, 247, 239, 5, 252, 253, 181, 251, 93, 114, 219 ]);
@@ -131,7 +131,7 @@ fn test_poseidon_random_input()
 
 /// Checks whether providing an empty input results in an error.
 #[test]
-fn test_empty_input() 
+fn empty_input() 
 {
     let empty: &[u8] = &[];
     let non_empty = &[1u8; 32];
@@ -228,7 +228,7 @@ const CIRCOMLIBJS_TEST_CASES: [[u8; 32]; 12] = [
 
 /// Check compatibility with circomlibjs.
 #[test]
-fn test_circom_1_to_12_inputs()
+fn circomlibjs_compat_1_to_12_inputs()
 {
     let mut inputs = Vec::new();
     let value = [vec![0u8; 31], vec![1u8]].concat();
