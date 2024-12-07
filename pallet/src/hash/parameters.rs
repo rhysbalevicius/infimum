@@ -29,12 +29,9 @@ use crate::hash::poseidon::{ PoseidonError, PoseidonParameters };
 /// * x^5 S-boxes
 /// * 3 inputs (one input with zeros and two inputs from the syscall)
 /// * 8 full rounds and 57 partial rounds
-///
-/// The argument of this macro is a type which implements
-/// [`ark_ff::PrimeField`](ark_ff::PrimeField).
+
 use ark_ff::PrimeField;
-// to avoid warnings when width_limit_13 feature is used
-#[allow(unused_variables)]
+
 pub fn get_poseidon_parameters<F: PrimeField + From<ark_ff::BigInteger256>>(
     t: u8,
 ) -> Result<PoseidonParameters<F>, PoseidonError> {

@@ -10,7 +10,8 @@ pub const HASH_LEN: usize = 32;
 pub const MAX_X5_LEN: usize = 13;
 
 #[derive(Debug, PartialEq)]
-pub enum PoseidonError {
+pub enum PoseidonError
+{
     InvalidNumberOfInputs {
         inputs: usize,
         max_limit: usize,
@@ -30,7 +31,8 @@ pub enum PoseidonError {
 }
 
 /// Parameters for the Poseidon hash algorithm.
-pub struct PoseidonParameters<F: PrimeField> {
+pub struct PoseidonParameters<F: PrimeField>
+{
     /// Round constants.
     pub ark: Vec<F>,
     /// MDS matrix.
@@ -47,7 +49,8 @@ pub struct PoseidonParameters<F: PrimeField> {
     pub alpha: u64,
 }
 
-impl<F: PrimeField> PoseidonParameters<F> {
+impl<F: PrimeField> PoseidonParameters<F> 
+{
     pub fn new(
         ark: Vec<F>,
         mds: Vec<Vec<F>>,
@@ -68,14 +71,16 @@ impl<F: PrimeField> PoseidonParameters<F> {
 }
 
 /// Trait for hashing inputs that are prime field elements.
-pub trait PoseidonHasher<F: PrimeField> {
+pub trait PoseidonHasher<F: PrimeField>
+{
     /// Calculates a Poseidon hash for the given input of prime fields and
     /// returns the result as a prime field.
     fn hash(&mut self, inputs: &[F]) -> Result<F, PoseidonError>;
 }
 
 /// Trait for hashing inputs that are byte slices.
-pub trait PoseidonBytesHasher {
+pub trait PoseidonBytesHasher
+{
     /// Calculates a Poseidon hash for the given input of big-endian byte slices
     /// and returns the result as a byte array.
     fn hash_bytes_be(&mut self, inputs: &[&[u8]]) -> Result<[u8; HASH_LEN], PoseidonError>;
@@ -86,22 +91,26 @@ pub trait PoseidonBytesHasher {
 }
 
 /// A stateful sponge performing Poseidon hash computation.
-pub struct Poseidon<F: PrimeField> {
+pub struct Poseidon<F: PrimeField>
+{
     params: PoseidonParameters<F>,
     domain_tag: F,
     state: Vec<F>,
 }
 
-impl<F: PrimeField> Poseidon<F> {
+impl<F: PrimeField> Poseidon<F>
+{
     /// Returns a new Poseidon hasher based on the given parameters.
     ///
     /// Optionally, a domain tag can be provided. If it is not provided, it
     /// will be set to zero.
-    pub fn new(params: PoseidonParameters<F>) -> Self {
+    pub fn new(params: PoseidonParameters<F>) -> Self 
+    {
         Self::with_domain_tag(params, F::zero())
     }
 
-    fn with_domain_tag(params: PoseidonParameters<F>, domain_tag: F) -> Self {
+    fn with_domain_tag(params: PoseidonParameters<F>, domain_tag: F) -> Self 
+    {
         let width = params.width;
         Self {
             domain_tag,
@@ -111,7 +120,8 @@ impl<F: PrimeField> Poseidon<F> {
     }
 
     #[inline(always)]
-    fn apply_ark(&mut self, round: usize) {
+    fn apply_ark(&mut self, round: usize) 
+    {
         self.state.iter_mut().enumerate().for_each(|(i, a)| {
             let c = self.params.ark[round * self.params.width + i];
             *a += c;
@@ -119,19 +129,22 @@ impl<F: PrimeField> Poseidon<F> {
     }
 
     #[inline(always)]
-    fn apply_sbox_full(&mut self) {
+    fn apply_sbox_full(&mut self) 
+    {
         self.state.iter_mut().for_each(|a| {
             *a = a.pow([self.params.alpha]);
         });
     }
 
     #[inline(always)]
-    fn apply_sbox_partial(&mut self) {
+    fn apply_sbox_partial(&mut self) 
+    {
         self.state[0] = self.state[0].pow([self.params.alpha]);
     }
 
     #[inline(always)]
-    fn apply_mds(&mut self) {
+    fn apply_mds(&mut self) 
+    {
         let new_state: Vec<F> = (0..self.state.len())
             .map(|i| {
                 self.state
@@ -144,9 +157,12 @@ impl<F: PrimeField> Poseidon<F> {
     }
 }
 
-impl<F: PrimeField> PoseidonHasher<F> for Poseidon<F> {
-    fn hash(&mut self, inputs: &[F]) -> Result<F, PoseidonError> {
-        if inputs.len() != self.params.width - 1 {
+impl<F: PrimeField> PoseidonHasher<F> for Poseidon<F> 
+{
+    fn hash(&mut self, inputs: &[F]) -> Result<F, PoseidonError> 
+    {
+        if inputs.len() != self.params.width - 1 
+        {
             return Err(PoseidonError::InvalidNumberOfInputs {
                 inputs: inputs.len(),
                 max_limit: self.params.width - 1,
@@ -156,7 +172,8 @@ impl<F: PrimeField> PoseidonHasher<F> for Poseidon<F> {
 
         self.state.push(self.domain_tag);
 
-        for input in inputs {
+        for input in inputs 
+        {
             self.state.push(*input);
         }
 
@@ -164,19 +181,22 @@ impl<F: PrimeField> PoseidonHasher<F> for Poseidon<F> {
         let half_rounds = self.params.full_rounds / 2;
 
         // full rounds + partial rounds
-        for round in 0..half_rounds {
+        for round in 0..half_rounds 
+        {
             self.apply_ark(round);
             self.apply_sbox_full();
             self.apply_mds();
         }
 
-        for round in half_rounds..half_rounds + self.params.partial_rounds {
+        for round in half_rounds..half_rounds + self.params.partial_rounds 
+        {
             self.apply_ark(round);
             self.apply_sbox_partial();
             self.apply_mds();
         }
 
-        for round in half_rounds + self.params.partial_rounds..all_rounds {
+        for round in half_rounds + self.params.partial_rounds..all_rounds 
+        {
             self.apply_ark(round);
             self.apply_sbox_full();
             self.apply_mds();
@@ -188,8 +208,10 @@ impl<F: PrimeField> PoseidonHasher<F> for Poseidon<F> {
     }
 }
 
-impl<F: PrimeField> PoseidonBytesHasher for Poseidon<F> {
-    fn hash_bytes_be(&mut self, inputs: &[&[u8]]) -> Result<[u8; HASH_LEN], PoseidonError> {
+impl<F: PrimeField> PoseidonBytesHasher for Poseidon<F> 
+{
+    fn hash_bytes_be(&mut self, inputs: &[&[u8]]) -> Result<[u8; HASH_LEN], PoseidonError> 
+    {
         let inputs: Result<Vec<F>, PoseidonError> = inputs
             .iter()
             .map(|input| {
@@ -209,7 +231,8 @@ impl<F: PrimeField> PoseidonBytesHasher for Poseidon<F> {
             .map_err(|_| PoseidonError::VecToArray)
     }
 
-    fn hash_bytes_le(&mut self, inputs: &[&[u8]]) -> Result<[u8; HASH_LEN], PoseidonError> {
+    fn hash_bytes_le(&mut self, inputs: &[&[u8]]) -> Result<[u8; HASH_LEN], PoseidonError> 
+    {
         let inputs: Result<Vec<F>, PoseidonError> = inputs
             .iter()
             .map(|input| {
@@ -235,10 +258,12 @@ where
 {
     let modulus_bytes_len = ((F::MODULUS_BIT_SIZE + 7) / 8) as usize;
 
-    if input.is_empty() {
+    if input.is_empty() 
+    {
         return Err(PoseidonError::EmptyInput);
     }
-    if input.len() > modulus_bytes_len {
+    if input.len() > modulus_bytes_len 
+    {
         return Err(PoseidonError::InvalidInputLength {
             len: input.len(),
             modulus_bytes_len,
@@ -254,7 +279,8 @@ where
     // Ensure the input length matches the modulus size
     let modulus_bytes_len = ((F::MODULUS_BIT_SIZE + 7) / 8) as usize;
 
-    if input.len() != modulus_bytes_len {
+    if input.len() != modulus_bytes_len
+    {
         return Err(PoseidonError::InvalidInputLength {
             len: input.len(),
             modulus_bytes_len,
@@ -265,22 +291,26 @@ where
     let element = F::from_le_bytes_mod_order(input);
 
     // Ensure the element is less than the modulus
-    if element.into_bigint() >= F::MODULUS {
+    if element.into_bigint() >= F::MODULUS
+    {
         return Err(PoseidonError::InputLargerThanModulus);
     }
 
     Ok(element)
 }
 
-impl<F: PrimeField> Poseidon<F> {
-    pub fn new_circom(nr_inputs: usize) -> Result<Poseidon<Fr>, PoseidonError> {
+impl<F: PrimeField> Poseidon<F>
+{
+    pub fn new_circom(nr_inputs: usize) -> Result<Poseidon<Fr>, PoseidonError>
+    {
         Self::with_domain_tag_circom(nr_inputs, Fr::zero())
     }
 
     pub fn with_domain_tag_circom(
         nr_inputs: usize,
         domain_tag: Fr,
-    ) -> Result<Poseidon<Fr>, PoseidonError> {
+    ) -> Result<Poseidon<Fr>, PoseidonError>
+    {
         let width = nr_inputs + 1;
         if width > MAX_X5_LEN {
             return Err(PoseidonError::InvalidWidthCircom {
