@@ -948,7 +948,7 @@ fn commit_outcome_partial_success()
         let proof_batches: vec::Vec<(ProofData, CommitmentData)> = vec::Vec::from([(process_proof_data, process_commitment), (tally_proof_data, tally_commitment)]);
         let scenario = get_poll_scenario(0);
 
-        assert_ok!(Infimum::commit_outcome(RuntimeOrigin::signed(0), proof_batches, Some(scenario.outcome)));
+        assert_ok!(Infimum::commit_outcome(RuntimeOrigin::signed(0), proof_batches, scenario.outcome));
         assert_eq!(Infimum::polls(0).unwrap().state.commitment.process, (1, process_commitment));
         assert_eq!(Infimum::polls(0).unwrap().state.commitment.tally, (1, tally_commitment));
         assert_eq!(Infimum::polls(0).unwrap().state.outcome, scenario.expected);
@@ -1046,13 +1046,13 @@ macro_rules! invoke_test_poll_scenario {
 
                 if scenario.interactions.len() > 0
                 {
-                    run_to_block(1 + signup_period + voting_period);
+                    run_to_block(2 + signup_period + voting_period);
                     assert_ok!(Infimum::merge_poll_state(RuntimeOrigin::signed(0)));
-                }
 
-                if scenario.proof_batches.len() > 0
-                {
-                    assert_ok!(Infimum::commit_outcome(RuntimeOrigin::signed(0), scenario.proof_batches, Some(scenario.outcome)));
+                    if scenario.proof_batches.len() > 0
+                    {
+                        assert_ok!(Infimum::commit_outcome(RuntimeOrigin::signed(0), scenario.proof_batches, scenario.outcome));
+                    }
                 }
 
                 assert_eq!(Infimum::polls(0).unwrap().state.outcome, scenario.expected);
@@ -1063,3 +1063,6 @@ macro_rules! invoke_test_poll_scenario {
 
 // A full chain of valid proofs should produce the correct outcome.
 invoke_test_poll_scenario!(commit_outcome_success, 1);
+
+// Correct outcome after every participant interacts with the poll.
+invoke_test_poll_scenario!(commit_outcome_full_round, 2);
