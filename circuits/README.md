@@ -1,5 +1,7 @@
 # infimum-circuits
 
+Fork of [maci-circuits](https://github.com/privacy-scaling-explorations/maci/tree/dev/packages/circuits).
+
 ```
 mkdir -p build
 ```
