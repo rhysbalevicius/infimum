@@ -44,10 +44,10 @@ export const waitForNumBlocks = async (api: ApiPromise, numBlocks: number): Prom
         });
     };
 
-export const provePollResults = async (poll: Poll) =>
+export const provePollResults = async (poll: Poll, artefactPath: string = 'data') =>
 {
-    const { process, tally, outcome } = getPollResults(poll);
-    const batches = await prove(process, tally);
+    const { processInputs, tallyInputs, outcome } = getPollResults(poll);
+    const batches = await prove(processInputs, tallyInputs, artefactPath);
     return {
         batches,
         outcome
@@ -55,37 +55,47 @@ export const provePollResults = async (poll: Poll) =>
 };
 
 export const prove = async (
-    processInputs: IProcessMessagesCircuitInputs,
-    tallyInputs: ITallyCircuitInputs,
+    processInputs: Array<IProcessMessagesCircuitInputs>,
+    tallyInputs: Array<ITallyCircuitInputs>,
     artefactPath: string = 'data'
 ): Promise<Array<[ProofData, Array<number>]>> =>
 {
-    const process = await snarkjs.groth16.fullProve(
-        processInputs as unknown as snarkjs.CircuitSignals,
-        path.join(__dirname, `${artefactPath}/process.wasm`),
-        path.join(__dirname, `${artefactPath}/process.zkey`)
-    );
-    const processCommitment = bnToBytes(processInputs['newSbCommitment']);
-
-    const tally = await snarkjs.groth16.fullProve(
-        tallyInputs as unknown as snarkjs.CircuitSignals,
-        path.join(__dirname, `${artefactPath}/tally.wasm`),
-        path.join(__dirname, `${artefactPath}/tally.zkey`)
-    );
-    const tallyCommitment = bnToBytes(tallyInputs['newTallyCommitment']);
-
     const vkProcess = JSON.parse(fs.readFileSync(path.join(__dirname, `${artefactPath}/vk-process.json`)).toString());
     const vkTally = JSON.parse(fs.readFileSync(path.join(__dirname, `${artefactPath}/vk-tally.json`)).toString());
 
-    if (!(await snarkjs.groth16.verify(vkProcess, process.publicSignals, process.proof)))
-        throw new Error('Process circuit verification failed');
+    const processProofs: Array<[ProofData, Array<number> ]> = [];
+    for (const input of processInputs)
+    {
+        const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+            input as unknown as snarkjs.CircuitSignals,
+            path.join(__dirname, `${artefactPath}/process.wasm`),
+            path.join(__dirname, `${artefactPath}/process.zkey`)
+        );
+        const commitment = bnToBytes(input['newSbCommitment']);
+        processProofs.push([ inf.serialize_proof(proof), commitment ]);
 
-    if (!(await snarkjs.groth16.verify(vkTally, tally.publicSignals, tally.proof)))
-        throw new Error('Tally circuit verification failed');
+        if (!(await snarkjs.groth16.verify(vkProcess, publicSignals, proof)))
+            throw new Error('Process circuit verification failed');
+    }
+
+    const tallyProofs: Array<[ProofData, Array<number> ]> = [];
+    for (const input of tallyInputs)
+    {
+        const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+            input as unknown as snarkjs.CircuitSignals,
+            path.join(__dirname, `${artefactPath}/tally.wasm`),
+            path.join(__dirname, `${artefactPath}/tally.zkey`)
+        );
+        const commitment = bnToBytes(input['newTallyCommitment']);
+        tallyProofs.push([ inf.serialize_proof(proof), commitment ]);
+
+        if (!(await snarkjs.groth16.verify(vkTally, publicSignals, proof)))
+            throw new Error('Tally circuit verification failed'); 
+    }
 
     return [
-        [ inf.serialize_proof(process.proof) as ProofData, processCommitment ],
-        [ inf.serialize_proof(tally.proof) as ProofData, tallyCommitment ]
+        ...processProofs,
+        ...tallyProofs
     ];
 };
 
@@ -93,8 +103,29 @@ export const asHex = (val: BigNumberish): string => `0x${BigInt(val).toString(16
 
 export const getPollResults = (poll: Poll) =>
 {
-    const process = poll.processMessages(poll.pollId, false, false);
-    const tally = poll.tallyVotesNonQv();
+    const processInputs: Array<IProcessMessagesCircuitInputs> = [];
+    for (;;)
+    {
+        try
+        {
+            const inputs = poll.processMessages(poll.pollId, false, false);
+            processInputs.push(inputs);
+        }
+        catch (_) { break; }
+    }
+    
+    const tallyInputs: Array<ITallyCircuitInputs> = [];
+    for (;;)
+    {
+        try
+        {
+            const inputs = poll.tallyVotesNonQv();
+            tallyInputs.push(inputs);
+        }
+        catch (_) { break; }
+    }
+
+    const tally = tallyInputs.at(-1)!;
     const newResultsCommitment = bnToBytes(
         genTreeCommitment(
             poll.tallyResult,
@@ -118,8 +149,8 @@ export const getPollResults = (poll: Poll) =>
         .map(a => a.map(b => b.map(c => bnToBytes(c))));
 
     return {
-        process,
-        tally,
+        processInputs,
+        tallyInputs,
         outcome: {
             tallyResults,
             tallyResultProofs,
