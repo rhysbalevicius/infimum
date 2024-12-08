@@ -50,5 +50,7 @@ docker compose --profile test up
 ## References
 
 - This work is based off of the Ethereum project [MACI](https://github.com/privacy-scaling-explorations/maci), which itself was originally proposed by [Vitalik Buterin](https://ethresear.ch/t/minimal-anti-collusion-infrastructure/5413). 
+- The zero-knowledge circuits have been forked from [maci-circuits](https://github.com/privacy-scaling-explorations/maci/tree/dev/packages/circuits)
+- The poseidon hasher is a fork of [light-poseidon](https://github.com/Lightprotocol/light-poseidon) for `no_std` compatibility
 - [W3F Proposal](https://github.com/w3f/Grants-Program/blob/master/applications/infimum.md)
 
