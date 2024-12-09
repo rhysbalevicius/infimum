@@ -49,7 +49,7 @@ docker compose --profile test up
 
 ### Interacting with the pallet
 
-The CLI for interacting with this pallet is currently under active development. Due to the complexity and sensitivity of the types of the extrinsic parameters other interfaces, such as the [frontend-template](https://github.com/rhysbalevicius/substrate-front-end-template), are highly difficult to use in order to interact with the pallet.  
+The CLI for interacting with this pallet is currently under active development. Due to the complexity and highly sensitive nature of the types of the extrinsic parameters other interfaces, such as the [frontend-template](https://github.com/rhysbalevicius/substrate-front-end-template), are highly difficult to use in order to interact with the pallet.  
 
 However in general the interaction flow is:
 - A user registers as a coordinator using the `register_as_coordinator` extrinsic.
@@ -65,6 +65,10 @@ However in general the interaction flow is:
 An end-to-end example of this flow can currently be found [here](https://github.com/rhysbalevicius/infimum/tree/main/cli/__tests__/e2e.test.ts). In order to run this example, you will first need to locally spin up a substrate node with the Infimum pallet. For your convenience, you can do so with: 
 ```sh
 cd /path/to/infimum
+
+# Download the zkeys
+curl --output ./cli/__tests__/data/process.zkey https://cdn.rhys.tech/infimum/process.zkey 
+curl --output ./cli/__tests__/data/tally.zkey https://cdn.rhys.tech/infimum/tally.zkey
 
 # Start the node
 docker-compose start runtime-node
