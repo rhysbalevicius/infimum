@@ -97,7 +97,6 @@ describe("End to end tests", function test()
                 pollId
             );
             const signature = command.sign(participant.keypair().privKey); 
-            // const ecdhKeypair = new Keypair(new PrivKey('shared')); 
             const ecdhKeypair = new Keypair(); 
             const sharedKey = Keypair.genEcdhSharedKey(ecdhKeypair.privKey, coordinator.keypair().pubKey);
             const message = command.encrypt(signature, sharedKey);
@@ -122,7 +121,7 @@ describe("End to end tests", function test()
             console.log(mergeInteractions);
 
             // Compute the proof inputs and outcome. 
-            const { batches, outcome } = await provePollResults(poll);
+            const { batches, outcome } = await provePollResults(poll, '../__tests__/data');
 
             const result = await coordinator.commitOutcome(batches, outcome);
             console.dir(result, { depth: null });

@@ -57,7 +57,7 @@ export const provePollResults = async (poll: Poll, artefactPath: string = 'data'
 export const prove = async (
     processInputs: Array<IProcessMessagesCircuitInputs>,
     tallyInputs: Array<ITallyCircuitInputs>,
-    artefactPath: string = 'data'
+    artefactPath: string
 ): Promise<Array<[ProofData, Array<number>]>> =>
 {
     const vkProcess = JSON.parse(fs.readFileSync(path.join(__dirname, `${artefactPath}/vk-process.json`)).toString());
