@@ -6,3 +6,4 @@ build
 .dev/frontend-template
 node_modules
 target
+**/*.zkey
