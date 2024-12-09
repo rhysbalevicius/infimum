@@ -190,6 +190,7 @@ pub fn get_poll_scenario(scenario_id: u32) -> PollScenario
     {
         0 => poll_scenario_0(),
         1 => poll_scenario_1(),
+        2 => poll_scenario_2(),
         _ => default_poll_scenario()
     }
 }
