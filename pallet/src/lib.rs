@@ -4,10 +4,24 @@ pub use pallet::*;
 use sp_std::vec;
 use sp_runtime::traits::SaturatedConversion;
 
-pub mod types;
-pub use types::*;
+use ark_bn254::{
+    Bn254,
+    Fr,
+    G1Affine, 
+    G2Affine
+};
+use ark_serialize::{CanonicalDeserialize};
+use ark_crypto_primitives::snark::SNARK;
+use ark_groth16::{
+    Groth16,
+    data_structures::Proof,
+    data_structures::VerifyingKey
+};
 
-mod constants;
+pub mod hash;
+pub mod poll;
+
+pub use poll::*;
 
 #[cfg(test)]
 mod mock;
@@ -42,10 +56,6 @@ pub mod pallet
 		#[pallet::constant]
 		type MaxCoordinatorPolls: Get<u32>;
 
-		/// The maximum length of a coordinators verification key.
-		#[pallet::constant]
-		type MaxVerifyKeyLength: Get<u32>;
-
 		/// The maximum number of poll outcomes.
 		#[pallet::constant]
 		type MaxVoteOptions: Get<u32>;
@@ -57,10 +67,6 @@ pub mod pallet
 		/// The maximum allowable number of poll interactions.
 		#[pallet::constant]
 		type MaxPollInteractions: Get<u32>;
-
-		/// The maximal allowable number of iterations in an extrinsic.
-		#[pallet::constant]
-		type MaxIterationDepth: Get<u32>;
 	}
 
 	#[pallet::event]
@@ -73,8 +79,8 @@ pub mod pallet
 			who: T::AccountId,
 			/// The public key of the coordinator.
 			public_key: PublicKey,
-			/// The verify key of the coordinator.
-			verify_key: VerifyKey<T>
+			/// The verifying keys of the coordinator.
+			verify_key: VerifyingKeys
 		},
 
 		/// A coordinator rotated one of their keys.
@@ -83,8 +89,8 @@ pub mod pallet
 			who: T::AccountId, 
 			/// The new public key.
 			public_key: PublicKey,
-			/// The new verify key.
-			verify_key: VerifyKey<T>
+			/// The new verifying keys.
+			verify_key: VerifyingKeys
 		},
 
 		/// A participant registered to vote in a poll.
@@ -145,8 +151,8 @@ pub mod pallet
 		PollOutcome {
 			/// The poll index.
 			poll_id: PollId,
-			/// The outcome of the poll.
-			outcome: u128
+			/// The outcome index of the poll.
+			outcome_index: u32
 		},
 
 		/// Empty and expired poll was nullified.
@@ -201,11 +207,26 @@ pub mod pallet
 		/// Poll outcome was previously committed and verified.
 		PollOutcomeAlreadyDetermined,
 
+		/// Poll state trees have not yet been merged.
+		PollStateNotMerged,
+
+		/// Poll state tree merge operation failed.
+		PollMergeFailed { reason: u8 },
+
+		/// Poll registration failed.
+		PollRegistrationFailed { reason: u8 },
+
+		/// Poll interaction failed.
+		PollInteractionFailed { reason: u8 },
+
 		/// The key(s) provided are malformed.
 		MalformedKeys,
 
 		/// A proof was rejected.
-		MalformedProof
+		MalformedProof,
+
+		/// The extrinsic arguments are insufficient.
+		MalformedInput
 	}
 
 	/// Map of ids to polls.
@@ -225,7 +246,7 @@ pub mod pallet
 		_, 
 		Blake2_128Concat, 
 		T::AccountId,
-		Coordinator<T>
+		Coordinator
 	>;
 
 	/// Map of coordinators to the poll Ids they manage.
@@ -253,16 +274,15 @@ pub mod pallet
 		pub fn register_as_coordinator(
 			origin: OriginFor<T>,
 			public_key: PublicKey,
-			verify_key: vec::Vec<u8>
+			verify_key: VerifyingKeys
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			ensure!(verify_key.len() > 0, Error::<T>::MalformedKeys);
-			let verify_key: VerifyKey<T> = verify_key
-				.try_into()
-				.map_err(|_| Error::<T>::MalformedKeys)?;
+			// Ensure the verification keys can be serialized as affine points.
+			ensure!(serialize_vkey(verify_key.process.clone()).is_some(), Error::<T>::MalformedKeys);
+			ensure!(serialize_vkey(verify_key.tally.clone()).is_some(), Error::<T>::MalformedKeys);
 
 			// A coordinator may only be registered once.
 			ensure!(
@@ -299,16 +319,15 @@ pub mod pallet
 		pub fn rotate_keys(
 			origin: OriginFor<T>,
 			public_key: PublicKey,
-			verify_key: vec::Vec<u8>
+			verify_key: VerifyingKeys
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
 			let sender = ensure_signed(origin)?;
 
-			ensure!(verify_key.len() > 0, Error::<T>::MalformedKeys);
-			let verify_key: VerifyKey<T> = verify_key
-				.try_into()
-				.map_err(|_| Error::<T>::MalformedKeys)?;
+			// Ensure the verification keys can be serialized as affine points.
+			ensure!(serialize_vkey(verify_key.process.clone()).is_some(), Error::<T>::MalformedKeys);
+			ensure!(serialize_vkey(verify_key.tally.clone()).is_some(), Error::<T>::MalformedKeys);
 
 			// Check if origin is registered as a coordinator.
 			let Some(mut coordinator) = Coordinators::<T>::get(&sender) else { Err(<Error::<T>>::CoordinatorNotRegistered)? };
@@ -355,7 +374,11 @@ pub mod pallet
 			origin: OriginFor<T>,
 			signup_period: BlockNumber,
 			voting_period: BlockNumber,
-			max_registrations: u32,
+			registration_depth: u8,
+			interaction_depth: u8,
+			process_subtree_depth: u8,
+			tally_subtree_depth: u8,
+			vote_option_tree_depth: u8,
 			vote_options: vec::Vec<u128>
 		) -> DispatchResult
 		{
@@ -364,8 +387,14 @@ pub mod pallet
 
 			// Validate config parameters.
 			let created_at = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
+			let max_registrations = 2_u32.pow(registration_depth.into());
 			ensure!(
 				max_registrations <= T::MaxPollRegistrations::get(),
+				Error::<T>::PollConfigInvalid
+			);
+			let max_interactions = 5_u32.pow(interaction_depth.into());
+			ensure!(
+				max_interactions <= T::MaxPollInteractions::get(),
 				Error::<T>::PollConfigInvalid
 			);
 
@@ -405,13 +434,19 @@ pub mod pallet
 				index,
 				created_at,
 				coordinator: sender.clone(),
-				state: PollState::default(),
+				state: PollState::new(
+					registration_depth,
+					interaction_depth
+				),
 				config: PollConfiguration {
 					signup_period,
 					voting_period,
 					max_registrations,
-					vote_options,
-					tree_arity: 2
+					max_interactions,
+					process_subtree_depth,
+					tally_subtree_depth,
+					vote_option_tree_depth,
+					vote_options
 				}
 			});
 
@@ -421,7 +456,7 @@ pub mod pallet
 
 			// Emit the creation event.
 			let starts_at = created_at + signup_period;
-			let ends_at = starts_at + voting_period;
+			let ends_at = starts_at + voting_period + 1;
 			Self::deposit_event(Event::PollCreated { 
 				coordinator: sender,
 				poll_id: index,
@@ -462,12 +497,15 @@ pub mod pallet
 			{
 				// Ensure that there was at least one registration.
 				ensure!(
-					poll.state.registrations.hashes.len() > 0,
+					poll.state.registrations.count > 0,
 					Error::<T>::PollDataEmpty
 				);
 
 				// Compute the root of the registration tree and save it.
-				let poll = poll.merge_registrations();
+				let poll = poll
+					.merge_registrations()
+					.map_err(|error| Error::<T>::PollMergeFailed { reason: error.into() })?;
+
 				Polls::<T>::insert(&poll_id, poll.clone());
 
 				// Emit the hash event.
@@ -488,12 +526,15 @@ pub mod pallet
 
 				// Ensure that there was at least one interaction.
 				ensure!(
-					poll.state.interactions.hashes.len() > 0,
+					poll.state.interactions.count > 0,
 					Error::<T>::PollDataEmpty
 				);
 
 				// Compute the root of the interaction tree and save it.
-				let poll = poll.merge_interactions();
+				let poll = poll
+					.merge_interactions()
+					.map_err(|error| Error::<T>::PollMergeFailed { reason: error.into() })?;
+
 				Polls::<T>::insert(&poll_id, poll.clone());
 
 				// Emit the hash event.
@@ -526,7 +567,7 @@ pub mod pallet
 		pub fn commit_outcome(
 			origin: OriginFor<T>,
 			batches: ProofBatches,
-			outcome: Option<OutcomeIndex>
+			outcome: Option<PollOutcome>
 		) -> DispatchResult
 		{
 			// Check that the extrinsic was signed and get the signer.
@@ -537,49 +578,54 @@ pub mod pallet
 			let Some(poll_id) = coordinator.last_poll else { Err(<Error::<T>>::PollDoesNotExist)? };
 			let Some(mut poll) = Polls::<T>::get(poll_id) else { Err(<Error::<T>>::PollDoesNotExist)? };
 
-			// Check that the state trees have been merged and that the outcome has not already been committed.
-			ensure!(
-				poll.is_merged() && !poll.is_fulfilled(),
-				Error::<T>::PollOutcomeAlreadyDetermined
-			);
+			// Check that the state trees have been merged 
+			ensure!(poll.is_merged(), Error::<T>::PollStateNotMerged);
 
-			let (mut index, mut value) = poll.state.commitment;
+			// Check that the outcome has not already been committed.
+			ensure!(!poll.is_fulfilled(), Error::<T>::PollOutcomeAlreadyDetermined);
 
-			// Verify each batch of proofs, in order.
-			for (proof, commitment) in batches.iter()
+			// Ensure at least one of the inputs have been provided.
+			ensure!(batches.len() > 0 || outcome.is_some(), Error::<T>::MalformedInput);
+
+			// Verify each batch of proofs in order.
+			for (proof, new_commitment) in batches.iter()
 			{
+				let Some((
+					verify_key,
+					public_inputs,
+					commitment
+				)) = poll.clone().prepare_public_inputs(
+					coordinator.clone(),
+					*new_commitment
+				) else { Err(<Error::<T>>::MalformedProof)? };
+
 				ensure!(
-					verify_proof(
-						poll.clone(),
-						coordinator.verify_key.clone(),
-						*proof,
-						*commitment
-					),
+					verify_proof(verify_key, public_inputs, proof.clone()),
 					Error::<T>::MalformedProof
 				);
-				index += 1;
-				value = *commitment;
-				poll.state.commitment = (index, value);
+
+				poll.state.commitment = commitment;
 			}
 
-			// Once the final batch is verified, check that the outcome matches the final commitment.
-			if let Some(outcome) = verify_outcome(poll.clone(), outcome)
-			{
-				poll.state.outcome = Some(outcome);
-
-				Self::deposit_event(Event::PollOutcome { 
-					poll_id,
-					outcome
-				});
-			}
-			else if batches.len() > 0
+			// Publish the commitment from the final batch.
+			if batches.len() > 0
 			{
 				Self::deposit_event(Event::PollCommitmentUpdated {
 					poll_id,
-					commitment: (index, value)
+					commitment: poll.clone().state.commitment
 				})
 			}
-			else { Err(<Error::<T>>::MalformedProof)? }
+
+			// Once the final proof batch is verified, verify that the outcome matches the final commitment.
+			if let Some(outcome_index) = poll.clone().verify_outcome(outcome)
+			{
+				poll.state.outcome = Some(outcome_index);
+
+				Self::deposit_event(Event::PollOutcome { 
+					poll_id,
+					outcome_index
+				});
+			}
 
 			// Update the poll state.
 			Polls::<T>::insert(poll_id, poll);
@@ -611,6 +657,10 @@ pub mod pallet
 				(poll.is_over() && poll.state.interactions.count == 0),
 				Error::<T>::PollCurrentlyActive
 			);
+
+			Self::deposit_event(Event::PollNullified {
+				poll_id
+			});
 
 			// Mark the poll as dead.
 			Polls::<T>::insert(poll_id, poll.nullify());
@@ -654,7 +704,10 @@ pub mod pallet
 			let block = <frame_system::Pallet<T>>::block_number().saturated_into::<u64>();
 			
 			// Insert the registration data into the poll state.
-			let (count, poll) = poll.register_participant(public_key, block);
+			let (count, poll) = poll
+				.register_participant(public_key, block)
+				.map_err(|error| Error::<T>::PollRegistrationFailed { reason: error.into() })?;
+
 			Polls::<T>::insert(
 				&poll_id, 
 				poll
@@ -707,7 +760,10 @@ pub mod pallet
 			);
 
 			// Insert the interaction data into the poll state.
-			let (count, poll) = poll.consume_interaction(public_key, data);
+			let (count, poll) = poll
+				.consume_interaction(public_key, data)
+				.map_err(|error| Error::<T>::PollInteractionFailed { reason: error.into() })?;
+
 			Polls::<T>::insert(
 				&poll_id, 
 				poll
@@ -725,28 +781,48 @@ pub mod pallet
 		}
 	}
 
-	// ==========================================
-	// TODO (M2) 
-	fn verify_proof<T: Config>(
-		_poll_data: Poll<T>,
-		_verify_key: VerifyKey<T>,
-		_proof_data: ProofData,
-		_commitment: CommitmentData
+	fn serialize_vkey(
+		vkey: VerifyKey
+	) -> Option<VerifyingKey::<Bn254>>
+	{
+		let Some(alpha_g1) = G1Affine::deserialize_uncompressed(&*vkey.alpha_g1).ok() else { return None; };
+		let Some(beta_g2) = G2Affine::deserialize_uncompressed(&*vkey.beta_g2).ok() else { return None; };
+		let Some(gamma_g2) = G2Affine::deserialize_uncompressed(&*vkey.gamma_g2).ok() else { return None; };
+		let Some(delta_g2) = G2Affine::deserialize_uncompressed(&*vkey.delta_g2).ok() else { return None; };
+		let gamma_abc_g1 = match vkey.gamma_abc_g1
+			.iter()
+			.map(|g| G1Affine::deserialize_uncompressed(g.as_slice()))
+			.collect::<Result<vec::Vec<G1Affine>, _>>()
+		{
+			Ok(value) => value,
+			Err(_) => return None
+		};
+
+		Some(VerifyingKey::<Bn254> { alpha_g1, beta_g2, gamma_g2, delta_g2, gamma_abc_g1 })
+	}
+
+	fn serialize_proof(
+		proof_data: ProofData
+	) -> Option<Proof::<Bn254>>
+	{
+	    let Some(a) = G1Affine::deserialize_uncompressed(&*proof_data.pi_a).ok() else { return None; };
+	    let Some(b) = G2Affine::deserialize_uncompressed(&*proof_data.pi_b).ok() else { return None; };
+	    let Some(c) = G1Affine::deserialize_uncompressed(&*proof_data.pi_c).ok() else { return None; };
+
+		Some(Proof::<Bn254> { a, b, c })
+	}
+
+	fn verify_proof(
+		verify_key: VerifyKey,
+		public_inputs: vec::Vec<Fr>,
+		proof_data: ProofData
 	) -> bool
 	{
-		true
-	}
-	fn verify_outcome<T: Config>(
-		poll_data: Poll<T>,
-		index: Option<OutcomeIndex>
-	) -> Option<Outcome>
-	{
-		let Some(index) = index else { return None };
-		if (index as usize) < poll_data.config.vote_options.len()
-		{
-			return Some(poll_data.config.vote_options[index as usize]);
-		}
+		let Some(vk) = serialize_vkey(verify_key) else { return false; };
+		let Some(pvk) = Groth16::<Bn254>::process_vk(&vk).ok() else { return false; };
+		let Some(proof) = serialize_proof(proof_data) else { return false; };
+		let Some(result) = Groth16::<Bn254>::verify_with_processed_vk(&pvk, &public_inputs, &proof).ok() else { return false; };
 
-		None
+		result
 	}
 }

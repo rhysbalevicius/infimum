@@ -1,0 +1,36 @@
+{
+    "name": "infimum-cli",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+        "build": "tsc",
+        "test": "jest --verbose --forceExit"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "devDependencies": {
+        "@jest/globals": "^29.7.0",
+        "@types/jest": "^29.5.14",
+        "@types/node": "^22.8.7",
+        "@types/snarkjs": "^0.7.8",
+        "jest": "^29.7.0",
+        "ts-jest": "^29.2.5",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.7.2"
+    },
+    "dependencies": {
+        "@polkadot/api": "^15.0.1",
+        "@zk-kit/baby-jubjub": "^1.0.3",
+        "@zk-kit/eddsa-poseidon": "^1.1.0",
+        "@zk-kit/poseidon-cipher": "^0.3.2",
+        "inf-lib": "file:lib/pkg",
+        "ink": "^5.0.1",
+        "maci-core": "^2.4.0",
+        "maci-crypto": "^2.4.0",
+        "maci-domainobjs": "^2.4.0",
+        "react": "^18.3.1",
+        "snarkjs": "^0.7.5"
+    }
+}

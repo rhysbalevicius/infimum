@@ -23,7 +23,7 @@ jobs:
           rustup default nightly
           rustup update nightly
           rustup update stable
-          rustup target add wasm32-unknown-unknown --toolchain nightly
+          rustup target add wasm32-unknown-unknown
 
       - name: Check Build
         run: |

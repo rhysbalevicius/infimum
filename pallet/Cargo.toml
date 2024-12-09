@@ -20,17 +20,16 @@ scale-info = { version = "2.5.0", default-features = false, features = ["derive"
 frame-benchmarking = { version = "4.0.0-dev", default-features = false, optional = true, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
 frame-support = { version = "4.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
 frame-system = { version = "4.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
-bls12_381 = "0.7.0"
-pairing = "0.22.0"
-group = "0.12.1"
 serde = { version = "1.0.149", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1.0.89", default-features = false, features = ["alloc"]}
-uint = { version = "0.8", default-features = false }
 sp-std = { version = "14.0.0", default-features = false, git = "https://github.com/paritytech/polkadot-sdk.git" }
 sp-io = { version = "23.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
 sp-runtime = { version = "24.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
-dusk-poseidon = { version = "0.33.0", default-features = false }
-dusk-bls12_381 = { version = "0.13", default-features = false }
+ark-bn254 = { version = "0.4.0", default-features = false, features = ["curve"] }
+ark-ff = { version = "0.4.2", default-features = false }
+ark-serialize = "0.4.2"
+ark-groth16 = { version = "0.4.0", default-features = false }
+ark-crypto-primitives = { version = "0.4.0", default-features = false, features = ["snark"] }
 
 [dev-dependencies]
 sp-core = { version = "21.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }

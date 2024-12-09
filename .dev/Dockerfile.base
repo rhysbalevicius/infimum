@@ -9,7 +9,9 @@ ENV CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG true
 
 RUN rustup update \
     && rustup update nightly \
-    && rustup target add wasm32-unknown-unknown
+    && rustup install nightly-2023-08-31 \
+    && rustup override set nightly-2023-08-31 \
+    && rustup target add wasm32-unknown-unknown --toolchain nightly-2023-08-31
 
 RUN apt-get update -y && apt-get install -y \
     build-essential \
@@ -19,7 +21,7 @@ RUN apt-get update -y && apt-get install -y \
     libssl-dev \
     protobuf-compiler 
 
-RUN git clone https://github.com/substrate-developer-hub/substrate-node-template.git /node
+RUN git clone https://github.com/rhysbalevicius/substrate-node-template.git /node
 
 COPY ./.dev/Cargo.toml ./node/Cargo.toml
 COPY ./.dev/runtime/Cargo.toml ./node/runtime/Cargo.toml

@@ -48,11 +48,9 @@ impl frame_system::Config for Test {
 
 impl Config for Test {
     type MaxCoordinatorPolls = ConstU32<2>;
-    type MaxVerifyKeyLength = ConstU32<4>;
-    type MaxVoteOptions = ConstU32<4>;
-    type MaxPollRegistrations = ConstU32<4>;
-    type MaxPollInteractions = ConstU32<4>;
-    type MaxIterationDepth = ConstU32<4>;
+    type MaxVoteOptions = ConstU32<1024>;
+    type MaxPollRegistrations = ConstU32<2_147_483_648>;
+    type MaxPollInteractions = ConstU32<1024>;
 	type RuntimeEvent = RuntimeEvent;
 }
 
