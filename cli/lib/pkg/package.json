@@ -1,0 +1,11 @@
+{
+  "name": "inf-lib",
+  "version": "0.1.0",
+  "files": [
+    "inf_lib_bg.wasm",
+    "inf_lib.js",
+    "inf_lib.d.ts"
+  ],
+  "main": "inf_lib.js",
+  "types": "inf_lib.d.ts"
+}
