@@ -6,4 +6,5 @@ build
 .dev/frontend-template
 node_modules
 target
-**/*.zkey
+cli/__tests__/data
+*.tar.gz
