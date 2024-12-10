@@ -31,4 +31,4 @@ jobs:
 
       - name: Run tests
         run: |
-          cargo +nightly test --all-features --manifest-path=./pallet/Cargo.toml
+          cargo test --all-features --manifest-path=./pallet/Cargo.toml
