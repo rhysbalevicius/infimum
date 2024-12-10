@@ -36,7 +36,7 @@ describe("End to end tests", function test()
         const wsProvider = new WsProvider('ws://127.0.0.1:9944');
         api = await ApiPromise.create({ provider: wsProvider });
 
-        coordinator = new Coordinator(api);
+        coordinator = new Coordinator(api, '//Alice', '//Alice', '../__tests__/data');
         const isUnregistered = (await api.query.infimum.coordinators(coordinator.address())).toHuman() === null;
         if (isUnregistered) await coordinator.registerAsCoordinator();
     });
