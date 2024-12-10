@@ -19,23 +19,15 @@ The Infimum project is intended to provide a private, receipt-free, and verifiab
 
 #### Requirements:
 - If you wish to run the tests with docker, you will need to have the [latest version](https://www.docker.com/) installed on your machine.
-- To run the tests on your local machine, you will need to have cargo installed. In particular:
-```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-source ~/.cargo/env
-rustup install nightly-2023-08-31
-rustup override set nightly-2023-08-31
-rustup default nightly-2023-08-31
-rustup target add wasm32-unknown-unknown --toolchain nightly-2023-08-31
-```
+- To run the tests on your local machine, you will need to have [cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html) installed. 
 
 ### Unit tests
 
-You can run the tests locally if you have [`cargo`](https://doc.rust-lang.org/cargo/index.html) installed.
+You can run the tests locally if you have [`cargo`](https://doc.rust-lang.org/cargo/getting-started/installation.html) installed.
 ```sh
 cd /path/to/infimum
 
-cargo +nightly test --manifest-path=./pallet/Cargo.toml
+cargo test --manifest-path=./pallet/Cargo.toml
 ```
 
 Alternatively, the unit tests can also be run with docker. 
@@ -43,7 +35,6 @@ Alternatively, the unit tests can also be run with docker.
 ```sh
 cd /path/to/infimum
 
-# Confirmed to be working using `Docker version 24.0.2, build cb74dfc`
 docker compose --profile test up
 ```
 
@@ -56,9 +47,9 @@ However in general the interaction flow is:
 - A coordinator creates a poll using the `create_poll` extrinsic.
 - Participants register for the poll during the registration period using the `register_as_participant` extrinsic.
 - Participants interact with the poll during the interaction period using the `interact_with_poll` extrinsic.
-- After the poll ends, the coordinator is then permitted:
-    - Merges the state trees using the `merge_poll_state` extrinsic. This calculates various public signals on chain which are later used to verify the zero-knowledge proofs.
-    - Generates proofs for the poll results offchain. The basic flow for compiling and generating proofs can be found in [circuits](https://github.com/rhysbalevicius/infimum/tree/main/circuits).
+- After the poll ends, the coordinator is then permitted to:
+    - Merge the state trees using the `merge_poll_state` extrinsic. This calculates various public signals on chain which are later used to verify the zero-knowledge proofs.
+    - Generate proofs for the poll results (offchain). The basic flow for compiling and generating proofs can be found in [circuits](https://github.com/rhysbalevicius/infimum/tree/main/circuits).
     - These proofs are then commited to the pallet storage using the `commit_outcome` extrinsic.
     - After every proof has been successfully submitted a `PollOutcome` event is deposited with the `outcome_index` field set.
 
@@ -66,15 +57,17 @@ An end-to-end example of this flow can currently be found [here](https://github.
 ```sh
 cd /path/to/infimum
 
-# Download the zkeys
-curl --output ./cli/__tests__/data/process.zkey https://cdn.rhys.tech/infimum/process.zkey 
-curl --output ./cli/__tests__/data/tally.zkey https://cdn.rhys.tech/infimum/tally.zkey
+# Download and extract the test data
+curl --output e2e.tar.gz https://cdn.rhys.tech/infimum/e2e.tar.gz
+tar xf e2e.tar.gz -C cli/__tests__
+rm e2e.tar.gz
 
 # Start the node
-docker-compose start runtime-node
-
-# Then open a new tab and navigate to the `cli` directory
-cd cli
+docker compose --profile node up
+```
+Then open a new terminal, navigate to the `cli` directory, and run the tests
+```sh
+cd /path/to/infimum/cli
 
 # Install the dependencies
 npm i
