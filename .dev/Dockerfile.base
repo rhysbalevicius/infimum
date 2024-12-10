@@ -8,9 +8,7 @@ ENV RUST_BACKTRACE 1
 ENV CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_DEBUG true
 
 RUN rustup update \
-    && rustup update nightly \
     && rustup install nightly-2023-08-31 \
-    && rustup override set nightly-2023-08-31 \
     && rustup target add wasm32-unknown-unknown --toolchain nightly-2023-08-31
 
 RUN apt-get update -y && apt-get install -y \
@@ -29,4 +27,4 @@ COPY ./.dev/runtime/src/lib.rs ./node/runtime/src/lib.rs
 COPY ./pallet ./node/pallets/infimum
 
 WORKDIR /node
-RUN cargo build --release
+RUN RUSTUP_TOOLCHAIN=nightly-2023-08-31 cargo +nightly-2023-08-31 build --release

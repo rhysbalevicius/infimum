@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   pallet-base:
     image: 'pallet-base'
@@ -15,11 +13,11 @@ services:
       dockerfile: .dev/Dockerfile.node
     depends_on:
       - pallet-base
-    command: cargo +nightly test --manifest-path=./pallets/infimum/Cargo.toml
+    command: cargo test --manifest-path=./pallets/infimum/Cargo.toml
 
   runtime-node:
     profiles: 
-      - dev
+      - node
     build:
       context: .
       dockerfile: .dev/Dockerfile.node
